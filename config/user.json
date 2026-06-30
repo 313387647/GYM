@@ -1,0 +1,17 @@
+{
+  "name": "主人",
+  "gender": "male",
+  "height_cm": 179,
+  "current_weight_kg": 98,
+  "phase_goal_weight_kg": 90,
+  "main_goal": "减脂塑形，提升身体状态",
+  "feeding_window": {
+    "start": "12:00",
+    "end": "20:00"
+  },
+  "targets": {
+    "calories": 2150,
+    "protein_g": 170
+  },
+  "timezone": "Asia/Shanghai"
+}

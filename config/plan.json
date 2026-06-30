@@ -1,0 +1,35 @@
+{
+  "weekly_plan": {
+    "Monday": "Upper A",
+    "Wednesday": "Lower",
+    "Friday": "Upper B"
+  },
+  "workouts": {
+    "Upper A": [
+      { "name": "哑铃卧推", "target": "22.5kg × 8-12 × 3" },
+      { "name": "高位下拉", "target": "52kg × 8-12 × 3" },
+      { "name": "坐姿划船", "target": "10-12 × 3" },
+      { "name": "肩推", "target": "8-12 × 3" },
+      { "name": "侧平举", "target": "12-15 × 3" },
+      { "name": "三头下压", "target": "10-15 × 3" },
+      { "name": "坡度走", "target": "20min" }
+    ],
+    "Lower": [
+      { "name": "深蹲", "target": "70-75kg × 6-10 × 3" },
+      { "name": "腿举", "target": "10-12 × 3" },
+      { "name": "罗马尼亚硬拉", "target": "8-10 × 3" },
+      { "name": "腿弯举", "target": "10-15 × 3" },
+      { "name": "提踵", "target": "12-20 × 3" },
+      { "name": "核心训练", "target": "10min" }
+    ],
+    "Upper B": [
+      { "name": "上斜哑铃卧推", "target": "8-12 × 3" },
+      { "name": "高位下拉", "target": "52kg × 8-12 × 3" },
+      { "name": "器械划船", "target": "10-12 × 3" },
+      { "name": "肩推", "target": "8-12 × 3" },
+      { "name": "二头弯举", "target": "10-15 × 3" },
+      { "name": "三头下压", "target": "10-15 × 3" },
+      { "name": "坡度走", "target": "20min" }
+    ]
+  }
+}

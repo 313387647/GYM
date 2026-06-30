@@ -1,5 +1,26 @@
 {
+  "name": "gym-catgirl-coach",
+  "version": "2.0.0",
+  "description": "Local WeChat catgirl fitness assistant for macOS",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "node src/index.js dev",
+    "start": "node src/index.js start",
+    "init-db": "node src/index.js init-db",
+    "health": "node src/index.js health",
+    "reminder:morning": "node src/index.js reminder morning_checkin --force",
+    "reminder:lunch": "node src/index.js reminder lunch --force",
+    "reminder:training": "node src/index.js reminder training_card --force",
+    "reminder:evening": "node src/index.js reminder evening_summary --force",
+    "install-agent": "bash scripts/install-launchagents.sh",
+    "uninstall-agent": "bash scripts/uninstall-launchagents.sh",
+    "backup": "bash scripts/backup.sh",
+    "test:message": "node src/index.js message \"97.8\" && node src/index.js message \"午饭鸡腿饭和拿铁\" && node src/index.js message \"练完了，卧推22.5 10 9 8，RPE 8\"",
+    "test:reminder": "node src/index.js reminder morning_checkin --force && node src/index.js reminder lunch --force && node src/index.js reminder training_card --force && node src/index.js reminder evening_summary --force"
+  },
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^16.4.7"
   }
 }

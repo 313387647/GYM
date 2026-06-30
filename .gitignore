@@ -35,6 +35,10 @@ node_modules/
 gym_coach.db
 gym_coach.db-shm
 gym_coach.db-wal
+data/gym.db
+data/gym.db-shm
+data/gym.db-wal
+data/gym.db-journal
 
 # 个人运行数据
 data/context.json
@@ -43,4 +47,5 @@ data/training.json
 data/daily/
 data/pending/
 data/*.log
+logs/
 *.log

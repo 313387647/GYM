@@ -1,0 +1,11 @@
+{
+  "morning_checkin": "07:30",
+  "lunch": "12:00",
+  "pre_workout": "17:30",
+  "training_card": "18:20",
+  "evening_summary": "21:50",
+  "weekly_summary": {
+    "day": "Sunday",
+    "time": "10:30"
+  }
+}
