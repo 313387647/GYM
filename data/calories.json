@@ -1,0 +1,23 @@
+{
+  "reference": {
+    "米饭": {"amount": "100g", "calories": 116, "protein_g": 2.6},
+    "馒头": {"amount": "1个", "calories": 223, "protein_g": 7},
+    "面条": {"amount": "200g熟", "calories": 220, "protein_g": 7},
+    "鸡胸肉": {"amount": "100g", "calories": 133, "protein_g": 31},
+    "牛肉": {"amount": "100g瘦", "calories": 125, "protein_g": 22},
+    "猪肉五花": {"amount": "100g", "calories": 395, "protein_g": 13},
+    "鸡蛋": {"amount": "1个", "calories": 70, "protein_g": 6},
+    "三文鱼": {"amount": "100g", "calories": 208, "protein_g": 20},
+    "豆腐": {"amount": "150g", "calories": 114, "protein_g": 12},
+    "西兰花": {"amount": "100g", "calories": 34, "protein_g": 3},
+    "炒青菜": {"amount": "1份", "calories": 100, "protein_g": 2},
+    "食用油": {"amount": "1勺", "calories": 120, "protein_g": 0},
+    "奶茶": {"amount": "中杯", "calories": 400, "protein_g": 3},
+    "拿铁": {"amount": "中杯", "calories": 150, "protein_g": 8},
+    "全麦面包": {"amount": "2片", "calories": 140, "protein_g": 5},
+    "希腊酸奶": {"amount": "200g", "calories": 130, "protein_g": 12},
+    "香蕉": {"amount": "1根", "calories": 100, "protein_g": 1},
+    "蛋白粉": {"amount": "1勺", "calories": 120, "protein_g": 25}
+  },
+  "notes": "炒菜比水煮多 80-150 kcal（油量）"
+}

@@ -1,0 +1,46 @@
+# 敏感信息
+config.json
+.env
+*.key
+*.pem
+token.json
+.claude/settings.local.json
+
+# 会话数据
+.claude/sessions/
+.claude/session-env/
+.claude/file-history/
+.claude/shell-snapshots/
+
+# 缓存
+.claude/cache/
+.claude/paste-cache/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 备份
+.claude/backups/
+backups/
+
+# Node
+node_modules/
+
+# SQLite 数据库（运行时生成，含个人数据）
+gym_coach.db
+gym_coach.db-shm
+gym_coach.db-wal
+
+# 个人运行数据
+data/context.json
+data/weight.json
+data/training.json
+data/daily/
+data/pending/
+data/*.log
+*.log

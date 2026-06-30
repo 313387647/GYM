@@ -1,0 +1,202 @@
+{
+  "phase": "phase_1",
+  "start_date": "2026-06-12",
+  "phases": {
+    "phase_1": {
+      "target_kg": 90,
+      "daily_calories": 2150,
+      "macros": {
+        "protein_g": 170,
+        "fat_g_min": 50,
+        "fat_g_max": 65,
+        "carbs_g": "fill_remaining"
+      },
+      "training": {
+        "type": "upper_lower",
+        "schedule": {
+          "monday": "upper_a",
+          "wednesday": "lower",
+          "friday": "upper_b"
+        },
+        "cardio_per_session_min": 20
+      }
+    },
+    "phase_2": {
+      "target_kg": 82,
+      "daily_calories": 2000,
+      "macros": {
+        "protein_g": 170,
+        "fat_g_min": 45,
+        "fat_g_max": 60,
+        "carbs_g": "fill_remaining"
+      }
+    },
+    "phase_3": {
+      "target_kg": 75,
+      "daily_calories": 1900,
+      "macros": {
+        "protein_g": 170,
+        "fat_g_min": 45,
+        "fat_g_max": 55,
+        "carbs_g": "fill_remaining"
+      }
+    }
+  },
+  "progression_rules": {
+    "description": "渐进超负荷规则 — 每次训练尝试比上次多一点",
+    "rules": [
+      "当某动作连续 2 次训练都能完成最高次数（如 3×12）时，下次加重 2.5kg（复合动作）或 1kg（孤立动作）",
+      "加重后目标次数范围下调（如 12→8），逐步再推回最高次数",
+      "如果某动作连续 3 次无法进步，降重 10% 做 deload 周，然后重新推进",
+      "有氧：每 2 周尝试坡度+1 或速度+0.5"
+    ],
+    "weight_increment": {
+      "compound": 2.5,
+      "isolation": 1,
+      "bodyweight": "加次数或加难度变体"
+    }
+  },
+  "warmup_protocol": {
+    "description": "每次训练前必做，约 5-8 分钟",
+    "steps": [
+      "5 分钟低强度有氧（快走/椭圆机）提升心率",
+      "动态拉伸：手臂画圈×10、腿摆×10、躯干旋转×10",
+      "目标肌群激活：空动作或弹力带热身 1-2 组",
+      "第一个动作：先做 1-2 组轻重量热身组（50%-70% 工作重量）"
+    ]
+  },
+  "deload_protocol": {
+    "trigger": "连续 2 周体重不降 或 训练连续 3 次无进步 或 主观疲劳感持续偏高",
+    "actions": [
+      "训练量减半（组数×0.5，重量不变）",
+      "热量维持（不增不减）1 周",
+      "优先保证睡眠 7-8 小时",
+      "1 周后恢复正常"
+    ]
+  },
+  "workouts": {
+    "upper_a": {
+      "name": "Upper A (Push Focus)",
+      "exercises": [
+        {"name": "哑铃卧推", "sets": 3, "reps": "8-12", "weight_kg": 22.5, "notes": "尝试冲击 22.5kg 全程"},
+        {"name": "高位下拉", "sets": 3, "reps": "8-12", "weight_kg": 52, "notes": ""},
+        {"name": "坐姿划船", "sets": 3, "reps": "10-12", "weight_kg": 45, "notes": ""},
+        {"name": "哑铃肩推", "sets": 3, "reps": "8-12", "weight_kg": 17.5, "notes": ""},
+        {"name": "哑铃侧平举", "sets": 3, "reps": "12-15", "weight_kg": 8, "notes": "控制离心"},
+        {"name": "绳索三头下压", "sets": 3, "reps": "12-15", "weight_kg": 20, "notes": ""},
+        {"name": "有氧-坡度走", "duration_min": 20, "intensity": "坡度12 速度4.5"}
+      ]
+    },
+    "lower": {
+      "name": "Lower (Legs + Core)",
+      "exercises": [
+        {"name": "杠铃深蹲", "sets": 3, "reps": "6-10", "weight_kg": 75, "notes": "重点动作！目标冲击 80kg"},
+        {"name": "罗马尼亚硬拉", "sets": 3, "reps": "8-12", "weight_kg": 60, "notes": "感受腘绳肌拉伸"},
+        {"name": "保加利亚分腿蹲", "sets": 3, "reps": "10-12", "weight_kg": 14, "notes": "每侧10-12次"},
+        {"name": "腿弯举", "sets": 3, "reps": "12-15", "weight_kg": 40, "notes": ""},
+        {"name": "悬垂举腿", "sets": 3, "reps": "12-15", "weight_kg": 0, "notes": "核心"},
+        {"name": "平板支撑", "sets": 3, "duration_sec": 45, "weight_kg": 0, "notes": ""},
+        {"name": "有氧-爬楼机", "duration_min": 20, "intensity": "level 7-8"}
+      ]
+    },
+    "upper_b": {
+      "name": "Upper B (Pull + Shoulder Focus)",
+      "exercises": [
+        {"name": "引体向上/助力", "sets": 3, "reps": "8-12", "weight_kg": "bodyweight", "notes": "做不满就助力到能完成"},
+        {"name": "哑铃肩推", "sets": 3, "reps": "8-12", "weight_kg": 17.5, "notes": ""},
+        {"name": "哑铃飞鸟", "sets": 3, "reps": "12-15", "weight_kg": 12, "notes": "上斜凳"},
+        {"name": "二头弯举", "sets": 3, "reps": "12-15", "weight_kg": 12, "notes": ""},
+        {"name": "面拉", "sets": 3, "reps": "15-20", "weight_kg": 15, "notes": "后束+肩袖健康"},
+        {"name": "悬垂举腿", "sets": 3, "reps": "12-15", "weight_kg": 0, "notes": "核心"},
+        {"name": "有氧-坡度走", "duration_min": 20, "intensity": "坡度12 速度4.5"}
+      ]
+    }
+  },
+  "meal_templates": {
+    "_note": "16:8 间歇断食，进食窗口 12:00-20:00，不吃早餐。训练日 3 次进食（午餐+训前加餐+练后晚餐），休息日 2 次（午餐+晚餐）。",
+    "lunch": {
+      "training_day": {
+        "calories": 900,
+        "protein_g": 70,
+        "carbs_g": 95,
+        "fat_g": 28
+      },
+      "rest_day": {
+        "calories": 1050,
+        "protein_g": 85,
+        "carbs_g": 110,
+        "fat_g": 32
+      },
+      "examples": [
+        "鸡胸肉 200g + 米饭 250g + 蔬菜",
+        "牛肉 150g + 红薯 300g + 西兰花",
+        "三文鱼 150g + 糙米饭 250g + 凉拌菜"
+      ]
+    },
+    "pre_workout_snack": {
+      "training_day_only": true,
+      "calories": 200,
+      "protein_g": 15,
+      "carbs_g": 28,
+      "fat_g": 5,
+      "timing": "17:00 下班前吃，为训练供能",
+      "examples": [
+        "全麦面包 1片 + 花生酱 1勺",
+        "香蕉 1根 + 酸奶 100g",
+        "燕麦 30g + 少量坚果"
+      ]
+    },
+    "post_workout_dinner": {
+      "training_day_only": true,
+      "note": "训练日练后餐即晚餐，不必再分练后餐+晚餐",
+      "calories": 1050,
+      "protein_g": 85,
+      "carbs_g": 97,
+      "fat_g": 32,
+      "timing": "训练结束后（约 19:30）",
+      "examples": [
+        "鸡胸肉 250g + 米饭 250g + 炒蔬菜 + 蛋 1个",
+        "瘦牛肉 200g + 土豆 300g + 西兰花 + 蔬菜汤",
+        "鱼片 200g + 荞麦面 180g + 蛋 2个 + 凉拌菜"
+      ]
+    },
+    "dinner": {
+      "rest_day_only": true,
+      "calories": 1100,
+      "protein_g": 85,
+      "carbs_g": 110,
+      "fat_g": 33,
+      "examples": [
+        "鸡胸肉 250g + 米饭 250g + 炒蔬菜",
+        "鱼片 200g + 荞麦面 180g + 蛋 2个",
+        "瘦牛肉 200g + 土豆 300g + 蔬菜汤"
+      ]
+    }
+  },
+  "free_meal_policy": {
+    "per_week": 1,
+    "rules": [
+      "不是 cheat day，是一顿自由餐",
+      "优先保证蛋白质（先吃肉和蛋）",
+      "不刻意限制但也不暴食（上限约 1500 kcal）",
+      "当天其他两餐适当缩减（各减 100-200 kcal）",
+      "放在训练日效果更好（多出来的热量更容易被利用）"
+    ]
+  },
+  "diet_break": {
+    "every_weeks": 10,
+    "duration_weeks": 1.5,
+    "daily_calories": 2800,
+    "purpose": "恢复代谢激素水平，缓解心理疲劳"
+  },
+  "hydration": {
+    "daily_liters_min": 2.5,
+    "daily_liters_target": 3,
+    "rules": [
+      "训练日至少 3L，休息日至少 2.5L",
+      "起床后先喝 500ml 温水",
+      "训练中每 15 分钟补水 150-200ml",
+      "用水杯量化（500ml 杯子，每天 5-6 杯）"
+    ]
+  }
+}
