@@ -18,7 +18,7 @@ test('v1 history migrates additively to current schema', (t) => {
   migrate({ databasePath, skipBackup: true });
   const migrated = new Database(databasePath);
   assert.equal(migrated.prepare('SELECT COUNT(*) count FROM meals').get().count, 1);
-  assert.equal(migrated.prepare('SELECT MAX(version) version FROM schema_version').get().version, 5);
+  assert.equal(migrated.prepare('SELECT MAX(version) version FROM schema_version').get().version, 6);
   assert.ok(migrated.prepare("SELECT name FROM sqlite_master WHERE name='reminders'").get());
   migrated.close();
 });

@@ -2,6 +2,8 @@ const { eventSchema } = require('../schemas/events');
 const { decisionSchema } = require('../schemas/actions');
 const logger = require('../utils/logger');
 const { LlmError } = require('../integrations/llm/errors');
+const { z } = require('zod');
+const { mealItemSchema } = require('../schemas/actions');
 
 const SCHEDULED_TYPES = new Set(['morning_check', 'meal_window', 'pre_workout', 'workout_window', 'evening_review', 'weekly_review', 'scheduled_check']);
 
@@ -10,9 +12,21 @@ function cancelled(signal) {
   const error = new Error('Request cancelled'); error.code = 'REQUEST_CANCELLED'; throw error;
 }
 
-function gramsFromText(text = '') {
-  const match = String(text).match(/(\d+(?:\.\d+)?)\s*(?:g|克)/i);
-  return match ? Number(match[1]) : null;
+const foodRecalibrationSchema = z.object({
+  items: z.array(mealItemSchema).min(1).max(20),
+  needs_clarification: z.boolean().default(false),
+  clarification_question: z.string().max(300).nullish(),
+});
+
+function inputKind(text) {
+  const value = String(text).trim();
+  if (/^(?:rpe\s*)?(?:10|[1-9])(?:\s*分)?$/i.test(value)) return 'workout_rpe';
+  if (/(?:\d+(?:\.\d+)?\s*(?:g|克)|整份|一碗|半碗|两个?蛋)/i.test(value)) return 'food_quantity';
+  return null;
+}
+
+function ambiguousTotalWeight(text, items) {
+  return items.length > 1 && /^\s*\d+(?:\.\d+)?\s*(?:g|克)\s*(?:左右)?\s*$/i.test(String(text));
 }
 
 class Orchestrator {
@@ -28,7 +42,7 @@ class Orchestrator {
     try {
       cancelled(signal);
       const initialContext = this.contextBuilder.build(event);
-      const pendingResult = event.type === 'user_message' ? this.completePending(event, initialContext, userIdHash, signal) : null;
+      const pendingResult = event.type === 'user_message' ? await this.completePending(event, initialContext, userIdHash, signal) : null;
       let decision;
       let actionResults = [];
       let responseOverride = null;
@@ -61,19 +75,33 @@ class Orchestrator {
     }
   }
 
-  completePending(event, context, userIdHash, signal) {
-    const pending = this.pendingInteractionRepository.active(userIdHash);
+  async completePending(event, context, userIdHash, signal) {
+    const kind = inputKind(event.payload.text);
+    if (!kind) return null;
+    const pending = this.pendingInteractionRepository.active(userIdHash, kind, event.timestamp);
     if (!pending) return null;
     cancelled(signal);
     if (pending.kind === 'food_quantity') {
-      const grams = gramsFromText(event.payload.text);
-      if (!grams) return null;
       const payload = pending.payload;
+      const analysis = payload.analysis;
+      if (ambiguousTotalWeight(event.payload.text, analysis.items)) {
+        return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '300g 是整份，还是其中某一种食物？', response_goal: '澄清多食物图片的份量归属', tone: 'neutral' }, actionResults: [], responseOverride: '300g 是整份，还是其中某一种食物？' };
+      }
+      const recalibration = await this.client.structuredJson({
+        schema: foodRecalibrationSchema,
+        messages: [
+          { role: 'system', content: '你是谨慎的营养校准器。根据已有图片分析和用户补充的份量重新估算每个食物的 amount、calories、protein_g、carbs_g、fat_g。不要沿用旧营养数字；不清楚时要求澄清。只输出 JSON。' },
+          { role: 'user', content: JSON.stringify({ original_analysis: analysis, quantity_description: event.payload.text }) },
+        ], temperature: 0.1, maxTokens: 1400, signal,
+      });
+      if (recalibration.data.needs_clarification) {
+        return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: recalibration.data.clarification_question || '这个份量是指整份还是其中某一种食物？', response_goal: '继续澄清图片饮食份量', tone: 'neutral' }, actionResults: [], responseOverride: recalibration.data.clarification_question || '这个份量是指整份还是其中某一种食物？' };
+      }
       const result = this.mealService.logMeal({ actionKey: `${event.id}:pending-food`, logicalDate: context.time.logical_date,
-        mealType: payload.meal_type || 'other', items: payload.items.map((item) => ({ ...item, amount: `${grams}g` })), sourceEventId: event.id,
+        mealType: payload.meal_type || 'other', items: recalibration.data.items, sourceEventId: event.id,
         sourceMessageId: payload.message_id, imageHash: payload.image_hash, recordedAt: event.timestamp });
       this.pendingInteractionRepository.complete(pending.id, event.timestamp);
-      return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '已根据用户补充的份量记录图片饮食', tone: 'neutral' }, actionResults: [result], responseOverride: `份量补充收到，已经按约 ${grams}g 记录好了。` };
+      return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '已根据用户补充的份量校准并记录图片饮食', tone: 'neutral' }, actionResults: [result], responseOverride: '份量补充收到，营养已经重新校准并记录好了。' };
     }
     if (pending.kind === 'workout_rpe') {
       const rpe = Number(String(event.payload.text).match(/(?:rpe\s*)?(10|[1-9])(?:\s*分)?/i)?.[1]);
@@ -98,11 +126,11 @@ class Orchestrator {
     const analysis = await this.foodVision.analyze(event.payload.path, { signal });
     if (!analysis.is_food) return { decision: { intent: 'chat', actions: [], needs_followup: false, response_goal: '自然说明这不是食物图片，不进行饮食记录', tone: 'neutral' }, actionResults: [] };
     if (analysis.confidence === 'low' || analysis.needs_clarification) {
-      this.pendingInteractionRepository.create({ userIdHash, kind: 'food_quantity', payload: { items: analysis.items, image_hash: analysis.image_hash, message_id: event.payload.message_id, meal_type: event.payload.meal_type }, sourceEventId: event.id, now: event.timestamp });
+      this.pendingInteractionRepository.create({ userIdHash, kind: 'food_quantity', payload: { analysis, image_hash: analysis.image_hash, message_id: event.payload.message_id, meal_type: event.payload.meal_type }, sourceEventId: event.id, now: event.timestamp });
       return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: analysis.clarification_question || '这张图的份量看不太准，你能告诉我大概多少克吗？我确认后再记录。', response_goal: '说明未自动入库并询问份量', tone: 'neutral' }, actionResults: [] };
     }
     const result = this.mealService.logMeal({ actionKey: `${event.id}:image`, logicalDate: context.time.logical_date, mealType: event.payload.meal_type || 'other', items: analysis.items, sourceEventId: event.id, sourceMessageId: event.payload.message_id, imageHash: analysis.image_hash, recordedAt: event.timestamp });
     return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: `图片饮食已分析并记录。识别说明：${analysis.notes || '无'}`, tone: 'neutral' }, actionResults: [result] };
   }
 }
-module.exports = { Orchestrator, SCHEDULED_TYPES };
+module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, inputKind, ambiguousTotalWeight };

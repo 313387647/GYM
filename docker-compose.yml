@@ -10,6 +10,7 @@ services:
       WECHAT_INBOX_DIR: /app/data/inbox
       WECHAT_ALLOWED_INBOX_ROOTS: /app/data/inbox
       WECHAT_INJECT_ENABLED: "false"
+      GYM_MIGRATE_ON_START: "true"
     volumes:
       - gym-data:/app/data
       - ./config.json:/app/config.json:ro
@@ -31,6 +32,10 @@ services:
     environment:
       WECHAT_ACP_INSTANCE: gym
       WECHAT_INJECT_ENABLED: "true"
+      GYM_MIGRATE_ON_START: "false"
+    depends_on:
+      gym-core:
+        condition: service_healthy
     volumes:
       - gym-data:/app/data
       - wechat-state:/wechat-state
@@ -46,6 +51,10 @@ services:
     environment:
       WECHAT_ACP_INSTANCE: gym
       WECHAT_INJECT_ENABLED: "true"
+      GYM_MIGRATE_ON_START: "false"
+    depends_on:
+      gym-core:
+        condition: service_healthy
     volumes:
       - gym-data:/app/data
       - wechat-state:/wechat-state

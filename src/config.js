@@ -60,6 +60,11 @@ function loadConfig(overrides = {}) {
       pollIntervalMs: Number(env.SCHEDULER_POLL_INTERVAL_MS || 60000),
       dispatchMode: env.SCHEDULER_DISPATCH_MODE || 'direct',
     },
+    migrateOnStart: !/^(0|false|no)$/i.test(env.GYM_MIGRATE_ON_START || 'true'),
+    outbound: {
+      maxRetries: Number(env.OUTBOUND_MAX_RETRIES || 3),
+      retryBaseMs: Number(env.OUTBOUND_RETRY_BASE_MS || 30000),
+    },
     wechat: {
       instance: env.WECHAT_ACP_INSTANCE || 'gym',
       inboxDir,

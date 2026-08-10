@@ -8,6 +8,7 @@ const { EventDispatcher } = require('../../src/scheduler/eventDispatcher');
 const { ReminderService } = require('../../src/services/reminderService');
 const { normalizePrompt } = require('../../src/integrations/wechat/normalizeMessage');
 const { LlmTimeoutError } = require('../../src/integrations/llm/errors');
+const { OutboundDeliveryWorker } = require('../../src/integrations/wechat/outboundWorker');
 
 const weightAndMeal = { intent: 'multi_action', actions: [
   { type: 'log_weight', weight_kg: 96.4 },
@@ -63,12 +64,80 @@ test('recent conversation and food clarification pending interaction close witho
   const fixture = createTestDb(); t.after(fixture.cleanup);
   let visionCalls = 0;
   const foodVision = { async analyze() { visionCalls += 1; return { is_food: true, confidence: 'low', needs_clarification: true, items: [{ name: '鸡肉', calories: 400, protein_g: 45 }], image_hash: 'pending-image' }; } };
-  const container = createTestContainer(fixture, { foodVision });
+  const client = { async structuredJson() { return { data: { items: [{ name: '鸡肉', amount: '300g', calories: 360, protein_g: 65, carbs_g: 0, fat_g: 8 }] } }; }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
   await container.orchestrator.handle({ id: 'food-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'm1', meal_type: 'lunch' } });
   const reply = await container.orchestrator.handle({ id: 'food-grams', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '300g左右' } });
   assert.equal(visionCalls, 1); assert.equal(reply.actions[0].success, true);
   assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 1);
   assert.equal(container.contextBuilder.build({ id: 'context', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:02:00.000Z', payload: {} }).recent_conversation.length >= 1, true);
+});
+
+test('food quantity clarification recalibrates nutrition through text model without another vision request', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let visionCalls = 0; let calibrationCalls = 0;
+  const foodVision = { async analyze() { visionCalls += 1; return { is_food: true, confidence: 'low', needs_clarification: true, items: [{ name: '鸡肉', amount: '未知', calories: 400, protein_g: 45, carbs_g: 0, fat_g: 12 }], image_hash: 'recal-image' }; } };
+  const client = { async structuredJson() { calibrationCalls += 1; return { data: { items: [{ name: '鸡肉', amount: '200g', calories: 260, protein_g: 50, carbs_g: 0, fat_g: 6 }] } }; }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'recal-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'm', meal_type: 'lunch' } });
+  await container.orchestrator.handle({ id: 'recal-answer', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '鸡肉约200g' } });
+  const meal = fixture.db.prepare('SELECT calories, protein_g, item_name FROM meals').get();
+  assert.equal(visionCalls, 1); assert.equal(calibrationCalls, 1);
+  assert.deepEqual(meal, { calories: 260, protein_g: 50, item_name: '鸡肉' });
+});
+
+test('ambiguous multi-item total weight remains pending instead of assigning it to every item', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const foodVision = { async analyze() { return { is_food: true, confidence: 'low', needs_clarification: true, items: [{ name: '鸡肉', calories: 200, protein_g: 30 }, { name: '米饭', calories: 300, protein_g: 5 }], image_hash: 'multi-image' }; } };
+  const client = { async structuredJson() { throw new Error('must not calibrate ambiguous total'); }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'multi-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'm', meal_type: 'lunch' } });
+  const result = await container.orchestrator.handle({ id: 'multi-answer', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '300g' } });
+  assert.match(result.response, /整份/);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
+  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_quantity', '2026-08-10T04:01:00.000Z').status, 'active');
+});
+
+test('pending interactions expire and numeric RPE prefers workout pending over food pending', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const container = createTestContainer(fixture);
+  const hash = '0bfe935e70c3';
+  for (const id of ['old-food', 'new-food', 'rpe-pending']) container.repositories.eventRepository.create({ id, type: 'user_message', user_id: 'u', timestamp: '2026-08-10T00:00:00.000Z', payload: {} }, hash);
+  container.repositories.pendingInteractionRepository.create({ userIdHash: hash, kind: 'food_quantity', payload: { analysis: { items: [] } }, sourceEventId: 'old-food', now: '2026-08-09T00:00:00.000Z' });
+  const expired = await container.orchestrator.handle({ id: 'today-food', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { text: '300g' } });
+  assert.equal(expired.actions.length, 0);
+  assert.equal(fixture.db.prepare("SELECT status FROM pending_interactions WHERE source_event_id='old-food'").get().status, 'expired');
+  const workout = container.services.workoutService.logWorkout({ actionKey: 'rpe-base', logicalDate: '2026-08-10', workoutType: 'upper_a', recordedAt: '2026-08-10T04:00:00.000Z' }).workout;
+  container.repositories.pendingInteractionRepository.create({ userIdHash: hash, kind: 'food_quantity', payload: { analysis: { items: [] } }, sourceEventId: 'new-food', now: '2026-08-10T04:00:00.000Z' });
+  container.repositories.pendingInteractionRepository.create({ userIdHash: hash, kind: 'workout_rpe', payload: { workout_id: workout.id }, sourceEventId: 'rpe-pending', now: '2026-08-10T04:00:00.000Z' });
+  await container.orchestrator.handle({ id: 'rpe-answer', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '8' } });
+  assert.equal(fixture.db.prepare('SELECT rpe_score FROM workouts WHERE id=?').get(workout.id).rpe_score, 8);
+  assert.equal(container.repositories.pendingInteractionRepository.active(hash, 'food_quantity', '2026-08-10T04:01:00.000Z').status, 'active');
+});
+
+test('outbound worker backs off, stops after max retries, and expires exhausted queued records', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const container = createTestContainer(fixture); const repo = container.repositories.eventRepository;
+  repo.create({ id: 'retry-event', type: 'morning_check', user_id: 'u', timestamp: '2026-08-10T00:00:00.000Z', payload: {} }, 'hash');
+  repo.createOutbound({ id: 'retry-outbound', eventId: 'retry-event', userIdHash: 'hash', content: 'hello', now: '2026-08-10T00:00:00.000Z' });
+  let attempts = 0; const worker = new OutboundDeliveryWorker({ config: { outbound: { maxRetries: 3, retryBaseMs: 30000 } }, repository: repo, injector: { async enqueue() { attempts += 1; throw new Error('inject down'); } } });
+  await worker.tick(new Date('2026-08-10T00:00:00.000Z'));
+  await worker.tick(new Date('2026-08-10T00:00:30.000Z'));
+  await worker.tick(new Date('2026-08-10T00:01:30.000Z'));
+  await worker.tick(new Date('2026-08-10T00:10:00.000Z'));
+  assert.equal(attempts, 3); assert.equal(repo.outbound('retry-outbound').status, 'failed');
+  repo.create({ id: 'queued-event', type: 'morning_check', user_id: 'u', timestamp: '2026-08-10T00:00:00.000Z', payload: {} }, 'hash');
+  repo.createOutbound({ id: 'queued-outbound', eventId: 'queued-event', userIdHash: 'hash', content: 'hello', now: '2026-08-10T00:00:00.000Z' });
+  fixture.db.prepare("UPDATE outbound_messages SET status='queued', retry_count=3, last_attempt_at='2026-08-10T00:00:00.000Z' WHERE id='queued-outbound'").run();
+  await worker.tick(new Date('2026-08-10T00:20:00.000Z'));
+  assert.equal(repo.outbound('queued-outbound').status, 'failed');
+});
+
+test('Docker gives migration ownership only to healthy gym-core', () => {
+  const compose = fs.readFileSync(path.join(__dirname, '../../docker-compose.yml'), 'utf8');
+  assert.match(compose, /gym-core:[\s\S]*GYM_MIGRATE_ON_START: "true"/);
+  assert.equal((compose.match(/GYM_MIGRATE_ON_START: "false"/g) || []).length, 2);
+  assert.equal((compose.match(/condition: service_healthy/g) || []).length, 2);
 });
 
 test('RPE follow-up updates the existing workout instead of inserting another', async (t) => {

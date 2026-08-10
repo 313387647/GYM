@@ -31,16 +31,23 @@ class EventRepository {
       .run(id, eventId, userIdHash, content, now);
   }
   outbound(id) { return this.db.prepare('SELECT * FROM outbound_messages WHERE id=?').get(id) || null; }
-  pendingOutbounds(limit = 20) { return this.db.prepare("SELECT * FROM outbound_messages WHERE status='pending' ORDER BY created_at LIMIT ?").all(limit); }
-  recoverStaleOutbounds(cutoff, now) {
-    return this.db.prepare(`UPDATE outbound_messages SET status='pending', error_code='stale_queue_recovered'
-      WHERE status='queued' AND last_attempt_at<? AND retry_count<3`).run(cutoff).changes;
+  pendingOutbounds({ now = new Date(), limit = 20, maxRetries = 3, retryBaseMs = 30000 } = {}) {
+    const rows = this.db.prepare("SELECT * FROM outbound_messages WHERE status='pending' AND retry_count<? ORDER BY created_at LIMIT ?").all(maxRetries, limit);
+    return rows.filter((row) => !row.last_attempt_at || now.getTime() - new Date(row.last_attempt_at).getTime() >= retryBaseMs * (2 ** Math.max(0, row.retry_count - 1)));
+  }
+  recoverStaleOutbounds(cutoff, now = new Date().toISOString(), maxRetries = 3) {
+    const failed = this.db.prepare(`UPDATE outbound_messages SET status='failed', error_code='stale_queue_max_retries', last_attempt_at=?
+      WHERE status='queued' AND last_attempt_at<? AND retry_count>=?`).run(now, cutoff, maxRetries).changes;
+    const recovered = this.db.prepare(`UPDATE outbound_messages SET status='pending', error_code='stale_queue_recovered'
+      WHERE status='queued' AND last_attempt_at<? AND retry_count<?`).run(cutoff, maxRetries).changes;
+    return { recovered, failed };
   }
   markOutboundQueued(id, now = new Date().toISOString()) {
     this.db.prepare("UPDATE outbound_messages SET status='queued', retry_count=retry_count+1, last_attempt_at=?, error_code=NULL WHERE id=? AND status='pending'").run(now, id);
   }
-  markOutboundAttemptFailed(id, errorCode, now = new Date().toISOString()) {
-    this.db.prepare("UPDATE outbound_messages SET retry_count=retry_count+1, last_attempt_at=?, error_code=? WHERE id=? AND status='pending'").run(now, errorCode, id);
+  markOutboundAttemptFailed(id, errorCode, now = new Date().toISOString(), maxRetries = 3) {
+    this.db.prepare(`UPDATE outbound_messages SET retry_count=retry_count+1, last_attempt_at=?, error_code=?,
+      status=CASE WHEN retry_count+1>=? THEN 'failed' ELSE 'pending' END WHERE id=? AND status='pending'`).run(now, errorCode, maxRetries, id);
   }
   markOutboundDelivered(id) {
     this.db.prepare("UPDATE outbound_messages SET status='delivered', delivered_at=? WHERE id=?")

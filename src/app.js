@@ -2,11 +2,13 @@
 const http = require('node:http');
 const { migrate } = require('./db/migrate');
 const { createContainer } = require('./container');
+const { loadConfig } = require('./config');
 const { createScheduler } = require('./scheduler/scheduler');
 const logger = require('./utils/logger');
 
-const migration = migrate();
-const container = createContainer();
+const config = loadConfig();
+const migration = config.migrateOnStart ? migrate() : { applied: [] };
+const container = createContainer({ config });
 const scheduler = createScheduler(container);
 if (container.config.scheduler.enabled) scheduler.start();
 

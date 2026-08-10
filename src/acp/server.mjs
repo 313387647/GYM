@@ -6,14 +6,17 @@ import containerModule from '../container.js';
 import normalizeModule from '../integrations/wechat/normalizeMessage.js';
 import idModule from '../utils/id.js';
 import migrateModule from '../db/migrate.js';
+import configModule from '../config.js';
 
 const { createContainer } = containerModule;
 const { normalizePrompt } = normalizeModule;
 const { stableId } = idModule;
 const { migrate } = migrateModule;
+const { loadConfig } = configModule;
 
-migrate();
-const container = createContainer();
+const config = loadConfig();
+if (config.migrateOnStart) migrate();
+const container = createContainer({ config });
 const sessions = new Map();
 
 async function sendText(cx, sessionId, text) {

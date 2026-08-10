@@ -29,7 +29,7 @@ class ContextBuilder {
       memory: this.memoryRepository.active(20),
       conversation_summary: this.memoryRepository.latestSummary(userIdHash)?.summary || null,
       recent_conversation: this.conversationRepository.recent(userIdHash, 16),
-      pending_interaction: this.pendingInteractionRepository.active(userIdHash),
+      pending_interaction: this.pendingInteractionRepository.active(userIdHash, null, event.timestamp),
       recent_reminders: this.reminderRepository.recentForType(event.type, recentReminderSince)
         .map(({ id, status, scheduled_at, sent_at, reason }) => ({ id, status, scheduled_at, sent_at, reason })),
     };

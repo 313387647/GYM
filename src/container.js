@@ -53,7 +53,7 @@ function createContainer(options = {}) {
   const decisionEngine = new DecisionEngine({ client });
   const actionExecutor = new ActionExecutor({ mealService, weightService, workoutService, lifeService, memoryService, scheduleMutationService });
   const responseComposer = new ResponseComposer({ client });
-  const orchestrator = new Orchestrator({ contextBuilder, decisionEngine, actionExecutor, responseComposer, eventRepository, foodVision, mealService, workoutService, conversationRepository, pendingInteractionRepository });
+  const orchestrator = new Orchestrator({ client, contextBuilder, decisionEngine, actionExecutor, responseComposer, eventRepository, foodVision, mealService, workoutService, conversationRepository, pendingInteractionRepository });
   return { config, db, client, foodVision, repositories: { mealRepository, weightRepository, workoutRepository, lifeRepository, memoryRepository, reminderRepository, eventRepository, scheduleRepository, conversationRepository, pendingInteractionRepository }, services: { planService, mealService, weightService, lifeService, memoryService, stateService, scheduleMutationService, workoutService }, contextBuilder, decisionEngine, actionExecutor, responseComposer, orchestrator };
 }
 module.exports = { createContainer };

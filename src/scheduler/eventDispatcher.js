@@ -23,22 +23,23 @@ class EventDispatcher {
       try {
         const delivery = await this.injector.enqueue(outboundId);
         if (delivery.queued) this.eventRepository.markOutboundQueued(outboundId, now.toISOString());
-        else this.eventRepository.markOutboundAttemptFailed(outboundId, delivery.reason || 'not_queued', now.toISOString());
+        else this.eventRepository.markOutboundAttemptFailed(outboundId, delivery.reason || 'not_queued', now.toISOString(), this.config.outbound.maxRetries);
       }
-      catch (error) { this.eventRepository.markOutboundAttemptFailed(outboundId, 'INJECT_FAILED', now.toISOString()); }
+      catch (error) { this.eventRepository.markOutboundAttemptFailed(outboundId, 'INJECT_FAILED', now.toISOString(), this.config.outbound.maxRetries); }
       return { ...transition, outbound_id: outboundId };
     }
     return transition;
   }
   async retryPendingOutbounds() {
-    this.eventRepository.recoverStaleOutbounds(new Date(Date.now() - 10 * 60 * 1000).toISOString(), new Date().toISOString());
+    const options = { maxRetries: this.config.outbound.maxRetries, retryBaseMs: this.config.outbound.retryBaseMs };
+    this.eventRepository.recoverStaleOutbounds(new Date(Date.now() - 10 * 60 * 1000).toISOString(), new Date().toISOString(), options.maxRetries);
     let queued = 0;
-    for (const outbound of this.eventRepository.pendingOutbounds()) {
+    for (const outbound of this.eventRepository.pendingOutbounds(options)) {
       try {
         const result = await this.injector.enqueue(outbound.id);
         if (result.queued) { this.eventRepository.markOutboundQueued(outbound.id); queued += 1; }
-        else this.eventRepository.markOutboundAttemptFailed(outbound.id, result.reason || 'not_queued');
-      } catch { this.eventRepository.markOutboundAttemptFailed(outbound.id, 'INJECT_FAILED'); }
+        else this.eventRepository.markOutboundAttemptFailed(outbound.id, result.reason || 'not_queued', new Date().toISOString(), options.maxRetries);
+      } catch { this.eventRepository.markOutboundAttemptFailed(outbound.id, 'INJECT_FAILED', new Date().toISOString(), options.maxRetries); }
     }
     return queued;
   }
