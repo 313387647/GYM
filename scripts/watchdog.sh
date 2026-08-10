@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED (V1 launchd watchdog). V2 relies on Docker restart policy and persistent reminders.
 # wechat-acp 健康检查 + 自动恢复
 # 通过 launchd 定时调用（每 30 分钟）
 # 检查项：进程存活 + inject 无卡死 + 无 getUpdates 错误 + 无新失败

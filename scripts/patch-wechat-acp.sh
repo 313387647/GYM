@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED: wechat-acp 0.10.x provides inbox/resources natively. V2 never runs this patch.
 # 补丁 wechat-acp：图片保存到 inbox + 路径注入消息
 # 必须每次 wechat-acp 更新后重新执行
 set -euo pipefail

@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED V1 cleanup helper. Do not use for V2 data.
 # GYM Coach 清理脚本
 # 用法: bash scripts/cleanup.sh
 # 移除 LaunchAgent、~/bin 脚本、日志（保留项目数据和 wechat-acp）

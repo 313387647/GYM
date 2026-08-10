@@ -1,9 +1,16 @@
 # 敏感信息
 config.json
 .env
+.env.*
+!.env.example
 *.key
 *.pem
+*.p12
+*.pfx
 token.json
+auth.json
+credentials.json
+.wechat-acp/
 .claude/settings.local.json
 
 # 会话数据
@@ -27,6 +34,8 @@ Thumbs.db
 # 备份
 .claude/backups/
 backups/
+.restore-backup/
+CLAUDE.backup.md
 
 # Node
 node_modules/
@@ -35,6 +44,12 @@ node_modules/
 gym_coach.db
 gym_coach.db-shm
 gym_coach.db-wal
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # 个人运行数据
 data/context.json
@@ -42,5 +57,10 @@ data/weight.json
 data/training.json
 data/daily/
 data/pending/
+data/inbox/
 data/*.log
 *.log
+
+# 临时 API / 调试产物
+.mimo_req_tmp.json
+*.debug.json

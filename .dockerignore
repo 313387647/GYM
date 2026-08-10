@@ -1,0 +1,10 @@
+.git
+.env
+config.json
+gym_coach.db*
+backups
+node_modules
+.restore-backup
+data/*
+!data/calories.json
+npm-debug.log*

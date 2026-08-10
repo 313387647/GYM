@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED (V1 fixed prompt injection). V2 uses src/scheduler/eventDispatcher.js.
 # 向 wechat-acp 注入提醒消息
 # 用法: inject-reminder.sh <morning|lunch|pre_workout|training|evening|weekly_report>
 # 注意: launchd 调用时需从 ~/bin 执行（TCC 限制），source 路径用绝对路径

@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED (V1 macOS LaunchAgent). V2 uses: npm start
 # GYM Coach 启动脚本
 # 用法: bash scripts/start.sh
 # 功能: 同步脚本到 ~/bin、管理 LaunchAgent 提醒
