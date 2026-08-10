@@ -36,7 +36,7 @@ class FoodVision {
     });
     this.maxBytes = maxBytes;
   }
-  async analyze(imagePath) {
+  async analyze(imagePath, { signal } = {}) {
     const resolved = fs.realpathSync(path.resolve(imagePath));
     if (!this.allowedRoots.some((root) => isInside(resolved, root))) throw new Error('Image path is outside the configured inbox');
     const stats = fs.statSync(resolved);
@@ -55,6 +55,7 @@ class FoodVision {
           { type: 'image_url', image_url: { url: `data:${mime};base64,${buffer.toString('base64')}` } },
         ] },
       ],
+      signal,
     });
     return { ...response.data, image_hash: imageHash, mime, path: resolved };
   }

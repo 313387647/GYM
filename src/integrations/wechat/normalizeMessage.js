@@ -16,6 +16,9 @@ function normalizePrompt(params, config, now = new Date()) {
     if (block.type === 'text') texts.push(block.text);
     if (block.type === 'image' && block.data && !imagePath) {
       const buffer = Buffer.from(block.data, 'base64');
+      if (buffer.length === 0 || buffer.length > config.wechat.maxImageBytes) {
+        const error = new Error('Image exceeds the configured size limit'); error.code = 'IMAGE_TOO_LARGE'; throw error;
+      }
       const hash = crypto.createHash('sha256').update(buffer).digest('hex');
       imagePath = path.join(config.wechat.inboxDir, `${hash}${extensionForMime(block.mimeType)}`);
       if (!fs.existsSync(imagePath)) fs.writeFileSync(imagePath, buffer, { flag: 'wx' });

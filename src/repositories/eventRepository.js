@@ -20,6 +20,11 @@ class EventRepository {
         fields.result ? JSON.stringify(fields.result) : null, fields.errorCode ?? null,
         new Date().toISOString(), id);
   }
+  saveDecision(id, decision) {
+    this.db.prepare(`UPDATE events SET decision_json=?, status='processing', error_code=NULL, updated_at=? WHERE id=?`)
+      .run(JSON.stringify(decision), new Date().toISOString(), id);
+    return this.get(id);
+  }
   createOutbound({ id, eventId, userIdHash, content, now }) {
     this.db.prepare(`INSERT OR IGNORE INTO outbound_messages
       (id, event_id, user_id_hash, content, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)`)
@@ -27,7 +32,16 @@ class EventRepository {
   }
   outbound(id) { return this.db.prepare('SELECT * FROM outbound_messages WHERE id=?').get(id) || null; }
   pendingOutbounds(limit = 20) { return this.db.prepare("SELECT * FROM outbound_messages WHERE status='pending' ORDER BY created_at LIMIT ?").all(limit); }
-  markOutboundQueued(id) { this.db.prepare("UPDATE outbound_messages SET status='queued' WHERE id=? AND status='pending'").run(id); }
+  recoverStaleOutbounds(cutoff, now) {
+    return this.db.prepare(`UPDATE outbound_messages SET status='pending', error_code='stale_queue_recovered'
+      WHERE status='queued' AND last_attempt_at<? AND retry_count<3`).run(cutoff).changes;
+  }
+  markOutboundQueued(id, now = new Date().toISOString()) {
+    this.db.prepare("UPDATE outbound_messages SET status='queued', retry_count=retry_count+1, last_attempt_at=?, error_code=NULL WHERE id=? AND status='pending'").run(now, id);
+  }
+  markOutboundAttemptFailed(id, errorCode, now = new Date().toISOString()) {
+    this.db.prepare("UPDATE outbound_messages SET retry_count=retry_count+1, last_attempt_at=?, error_code=? WHERE id=? AND status='pending'").run(now, errorCode, id);
+  }
   markOutboundDelivered(id) {
     this.db.prepare("UPDATE outbound_messages SET status='delivered', delivered_at=? WHERE id=?")
       .run(new Date().toISOString(), id);

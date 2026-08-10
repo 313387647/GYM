@@ -9,8 +9,9 @@ services:
       GYM_DB_PATH: /app/data/gym_coach.db
       WECHAT_INBOX_DIR: /app/data/inbox
       WECHAT_ALLOWED_INBOX_ROOTS: /app/data/inbox
+      WECHAT_INJECT_ENABLED: "false"
     volumes:
-      - ./data:/app/data
+      - gym-data:/app/data
       - ./config.json:/app/config.json:ro
     ports:
       - "127.0.0.1:3000:3000"
@@ -20,3 +21,36 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+  wechat-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.wechat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WECHAT_ACP_INSTANCE: gym
+      WECHAT_INJECT_ENABLED: "true"
+    volumes:
+      - gym-data:/app/data
+      - wechat-state:/wechat-state
+      - ./config.json:/app/config.json:ro
+    command: ["wechat-acp", "--instance", "gym", "--agent", "npm run acp", "--cwd", "/app", "--inbox-dir", "/app/data/inbox", "--hide-thoughts", "--session-resume", "auto"]
+  wechat-delivery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.wechat
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WECHAT_ACP_INSTANCE: gym
+      WECHAT_INJECT_ENABLED: "true"
+    volumes:
+      - gym-data:/app/data
+      - wechat-state:/wechat-state
+      - ./config.json:/app/config.json:ro
+    command: ["node", "src/integrations/wechat/outboundWorker.js"]
+volumes:
+  gym-data:
+  wechat-state:

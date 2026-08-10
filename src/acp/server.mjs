@@ -56,7 +56,8 @@ const app = acp.agent({ name: 'gym-coach-v2' })
         timestamp: new Date().toISOString(),
         payload: normalized.payload,
       };
-      const result = await container.orchestrator.handle(event);
+      const result = await container.orchestrator.handle(event, { signal: session.controller.signal });
+      if (session.controller.signal.aborted) return { stopReason: 'cancelled' };
       await sendText(ctx.client, ctx.params.sessionId, result.response);
       return { stopReason: 'end_turn' };
     } catch (error) {

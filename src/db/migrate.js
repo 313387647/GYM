@@ -8,6 +8,7 @@ const migrations = [
   require('./migrations/002_agent_runtime'),
   require('./migrations/003_default_schedules'),
   require('./migrations/004_dynamic_training_windows'),
+  require('./migrations/005_reliability_pass'),
 ];
 
 function backupDatabase(databasePath) {

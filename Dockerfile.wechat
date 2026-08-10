@@ -1,0 +1,11 @@
+FROM node:20-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm install --global wechat-acp@0.10.0
+COPY src ./src
+COPY prompts ./prompts
+COPY plan.json config.example.json ./
+COPY data/calories.json ./data/calories.json
+RUN mkdir -p /app/data/inbox /wechat-state && chown -R node:node /app /wechat-state
+USER node
+ENV NODE_ENV=production HOME=/wechat-state GYM_DATA_DIR=/app/data GYM_DB_PATH=/app/data/gym_coach.db WECHAT_INBOX_DIR=/app/data/inbox WECHAT_ALLOWED_INBOX_ROOTS=/app/data/inbox

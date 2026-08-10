@@ -29,6 +29,11 @@ class ReminderRepository {
       completed_at=COALESCE(?, completed_at), updated_at=? WHERE id=?`)
       .run(status, options.scheduledAt ?? null, options.reason ?? null, sentAt, completedAt, options.now, id);
   }
+  retry(id, { scheduledAt, reason, now }) {
+    return this.db.prepare(`UPDATE reminders SET status='pending', scheduled_at=?, reason=?, retry_count=retry_count+1,
+      last_attempt_at=?, updated_at=? WHERE id=? AND status='processing' AND retry_count<3`)
+      .run(scheduledAt, reason, now, now, id).changes === 1;
+  }
   recentForType(eventType, since) {
     return this.db.prepare(`SELECT * FROM reminders WHERE event_type=? AND scheduled_at>=?
       ORDER BY scheduled_at DESC LIMIT 10`).all(eventType, since);

@@ -65,11 +65,12 @@ function loadConfig(overrides = {}) {
       inboxDir,
       allowedInboxRoots: (env.WECHAT_ALLOWED_INBOX_ROOTS || inboxDir)
         .split(path.delimiter).filter(Boolean).map((entry) => path.resolve(entry)),
+      maxImageBytes: Number(env.WECHAT_MAX_IMAGE_BYTES || 15 * 1024 * 1024),
       injectEnabled: /^(1|true|yes)$/i.test(env.WECHAT_INJECT_ENABLED || ''),
-      executable: env.WECHAT_ACP_EXECUTABLE || 'npx',
+      executable: env.WECHAT_ACP_EXECUTABLE || 'wechat-acp',
       executableArgs: (() => {
-        try { return JSON.parse(env.WECHAT_ACP_EXECUTABLE_ARGS || '["-y","wechat-acp@0.10.0"]'); }
-        catch { return ['-y', 'wechat-acp@0.10.0']; }
+        try { return JSON.parse(env.WECHAT_ACP_EXECUTABLE_ARGS || '[]'); }
+        catch { return []; }
       })(),
     },
     user: userConfig.user || {},

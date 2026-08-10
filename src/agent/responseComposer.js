@@ -11,7 +11,7 @@ function fallbackResponse(decision, actionResults) {
 
 class ResponseComposer {
   constructor({ client }) { this.client = client; }
-  async compose({ event, decision, actionResults, updatedContext }) {
+  async compose({ event, decision, actionResults, updatedContext, signal }) {
     if (decision.notification && decision.notification.action !== 'send') return null;
     try {
       const response = await this.client.text({
@@ -21,6 +21,7 @@ class ResponseComposer {
         ],
         temperature: 0.55,
         maxTokens: 800,
+        signal,
       });
       return response.content.trim();
     } catch {

@@ -4,10 +4,12 @@ const { MemoryRepository } = require('../repositories/memoryRepository');
 const { ReminderRepository } = require('../repositories/reminderRepository');
 
 class ContextBuilder {
-  constructor({ config, stateService, planService, mealRepository, weightRepository, memoryRepository, reminderRepository }) {
+  constructor({ config, stateService, planService, mealRepository, weightRepository, memoryRepository, reminderRepository, conversationRepository, pendingInteractionRepository }) {
     Object.assign(this, { config, stateService, planService, mealRepository, weightRepository });
     this.memoryRepository = memoryRepository;
     this.reminderRepository = reminderRepository;
+    this.conversationRepository = conversationRepository;
+    this.pendingInteractionRepository = pendingInteractionRepository;
   }
   build(event) {
     const time = getLogicalTime(event.timestamp, { timezone: this.config.timezone, cutoffHour: this.config.logicalDayCutoffHour });
@@ -26,6 +28,8 @@ class ContextBuilder {
       },
       memory: this.memoryRepository.active(20),
       conversation_summary: this.memoryRepository.latestSummary(userIdHash)?.summary || null,
+      recent_conversation: this.conversationRepository.recent(userIdHash, 16),
+      pending_interaction: this.pendingInteractionRepository.active(userIdHash),
       recent_reminders: this.reminderRepository.recentForType(event.type, recentReminderSince)
         .map(({ id, status, scheduled_at, sent_at, reason }) => ({ id, status, scheduled_at, sent_at, reason })),
     };

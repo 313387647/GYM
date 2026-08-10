@@ -1,9 +1,14 @@
+const SCHEDULED_EVENT_TYPES = new Set(['morning_check', 'meal_window', 'pre_workout', 'workout_window', 'evening_review', 'weekly_review', 'scheduled_check']);
 class ActionExecutor {
-  constructor({ mealService, weightService, workoutService, lifeService, memoryService }) {
-    Object.assign(this, { mealService, weightService, workoutService, lifeService, memoryService });
+  constructor({ mealService, weightService, workoutService, lifeService, memoryService, scheduleMutationService }) {
+    Object.assign(this, { mealService, weightService, workoutService, lifeService, memoryService, scheduleMutationService });
   }
-  execute(actions, { event, context }) {
+  execute(actions, { event, context, signal }) {
+    if (SCHEDULED_EVENT_TYPES.has(event.type) && actions.length) {
+      const error = new Error(`Scheduled event ${event.type} cannot write health facts`); error.code = 'SCHEDULED_ACTION_FORBIDDEN'; throw error;
+    }
     return actions.map((action, index) => {
+      if (signal?.aborted) { const error = new Error('Request cancelled before action execution'); error.code = 'REQUEST_CANCELLED'; throw error; }
       const common = {
         actionKey: `${event.id}:${index}`,
         logicalDate: context.time.logical_date,
@@ -14,14 +19,16 @@ class ActionExecutor {
         case 'log_weight': return this.weightService.logWeight({ ...common, weightKg: action.weight_kg, notes: action.notes });
         case 'log_meal': return this.mealService.logMeal({ ...common, mealType: action.meal_type, items: action.items, sourceMessageId: event.payload.message_id });
         case 'log_workout': return this.workoutService.logWorkout({ ...common, workoutType: action.workout_type, workoutName: action.workout_name, totalDurationMin: action.total_duration_min, cardioDoneMin: action.cardio_done_min, rpeScore: action.rpe_score, notes: action.notes });
+        case 'update_workout_rpe': return this.workoutService.updateRpe({ ...common, workoutId: action.workout_id, logicalDate: context.time.logical_date, rpeScore: action.rpe_score, notes: action.notes });
         case 'log_sleep': return this.lifeService.logSleep({ ...common, hours: action.hours, quality: action.quality, bedtime: action.bedtime, wakeTime: action.wake_time, notes: action.notes });
         case 'log_checkin': return this.lifeService.logCheckin({ ...common, energy: action.energy, mood: action.mood, workload: action.workload, soreness: action.soreness, trainingReadiness: action.training_readiness, notes: action.notes });
         case 'upsert_temporary_event': return this.lifeService.upsertTemporaryEvent({ ...common, eventType: action.event_type, description: action.description, startsAt: action.starts_at, endsAt: action.ends_at, now: event.timestamp });
         case 'remember': return this.memoryService.remember({ ...common, type: action.memory_type, key: action.key, content: action.content, importance: action.importance, now: event.timestamp });
+        case 'update_schedule_rule': return this.scheduleMutationService.updateRule({ ...common, ruleId: action.rule_id, localTime: action.local_time, enabled: action.enabled, weekdays: action.weekdays, now: event.timestamp });
         default: throw new Error(`Unsupported action type: ${action.type}`);
       }
     });
   }
 }
 
-module.exports = { ActionExecutor };
+module.exports = { ActionExecutor, SCHEDULED_EVENT_TYPES };

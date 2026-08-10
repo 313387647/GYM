@@ -135,10 +135,10 @@ npm run acp
 
 V2 针对官方 `wechat-acp` 0.10.x 的能力设计。官方已经支持 custom raw agent command、ACP stdio、原生 inbox/图片 resource、文件队列 inject 和 session；因此不再 patch `node_modules`。
 
-先启动 `npm start`，再在 repo 根目录另开一个终端：
+本地联调可先启动 `npm start`，再在 repo 根目录另开一个终端：
 
 ```bash
-npx -y wechat-acp@0.10.0 \
+npx --yes wechat-acp@0.10.0 \
   --instance gym \
   --agent "npm run acp" \
   --cwd "$PWD" \
@@ -149,7 +149,7 @@ npx -y wechat-acp@0.10.0 \
 
 第一次会显示二维码。扫码后，微信文字或图片会进入同一个 Orchestrator。图片文件只能从配置允许的 inbox 读取；路径越界会被拒绝。
 
-主动提醒需要让 Scheduler 使用官方 `inject` 队列唤醒同一个微信会话：
+主动提醒会先落到 SQLite 的 `outbound_messages`。单机联调时 Scheduler 可以使用官方 `inject` 队列；Docker 拓扑则由持有同一 wechat-acp state 的 delivery worker 注入，避免两个容器各自拥有独立登录/session。
 
 ```dotenv
 WECHAT_ACP_INSTANCE=gym
@@ -195,7 +195,15 @@ docker compose build
 docker compose up gym-core
 ```
 
-`docker-compose.yml` 使用 `./data:/app/data` 持久化 SQLite/inbox；容器删除或重启不会删除宿主机数据。镜像以非 root 用户运行并带 healthcheck。
+`docker-compose.yml` 预先定义了三个服务：
+
+- `gym-core`：HTTP healthcheck、migration 与持久化 Scheduler；它只写 SQLite/outbound queue，不直接操作 wechat-acp state。
+- `wechat-bridge`：固定 `wechat-acp@0.10.0`，通过 ACP stdio 运行 `npm run acp`，负责收取微信消息。
+- `wechat-delivery-worker`：从同一 SQLite 的 pending outbound queue 有限重试，并通过同一 wechat-acp instance 注入消息。
+
+`gym-data` 持久化 SQLite 与 inbox，`wechat-state` 持久化 wechat-acp 的 HOME/session。bridge 与 delivery worker 同时挂载这两个 volume，instance 均为 `gym`，因此 Scheduler 的提醒不会落到另一份独立登录状态。运行时不使用 `npx` 下载最新版；镜像构建时固定安装 `wechat-acp@0.10.0`。镜像以非 root 用户运行，gym-core 带 healthcheck。
+
+SQLite 的 named volume 可用 `docker volume inspect` 定位；生产部署前应额外配置宿主机备份任务或将 `gym-data` 换为明确的 bind mount。
 
 本阶段没有 SSH 腾讯云、没有修改 Nginx/ShadowPM/PostgreSQL，也没有部署正式服务器。真正上云前还需要确认备份目录、日志轮转、wechat-acp 登录凭据持久化和服务器磁盘权限。
 

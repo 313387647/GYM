@@ -13,6 +13,12 @@ class WorkoutRepository {
     return this.byId(Number(result.lastInsertRowid));
   }
   byId(id) { return this.db.prepare('SELECT * FROM workouts WHERE id=?').get(id) || null; }
+  updateRpe(id, rpeScore, notes) {
+    const existing = this.byId(id);
+    if (!existing) return null;
+    this.db.prepare('UPDATE workouts SET rpe_score=?, notes=COALESCE(?, notes) WHERE id=?').run(rpeScore, notes ?? null, id);
+    return this.byId(id);
+  }
   latestForDate(date) { return this.db.prepare('SELECT * FROM workouts WHERE logical_date=? ORDER BY id DESC LIMIT 1').get(date) || null; }
   recent(limit = 10) { return this.db.prepare('SELECT * FROM workouts ORDER BY logical_date DESC, id DESC LIMIT ?').all(limit); }
 }
