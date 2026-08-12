@@ -82,6 +82,27 @@ test('scheduled MiMo timeout schedules retry without outbound delivery', async (
   assert.equal(container.repositories.reminderRepository.get(reminder.id).status, 'pending');
 });
 
+test('inject-disabled core leaves outbound retry ownership to the delivery worker', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const container = createTestContainer(fixture);
+  const event = { id: 'worker-owned-event', type: 'scheduled_check', user_id: 'u', timestamp: '2026-08-10T00:00:00.000Z', payload: {} };
+  container.repositories.eventRepository.create(event, 'test-user');
+  container.repositories.eventRepository.createOutbound({ id: 'worker-owned-outbound', eventId: event.id, userIdHash: 'test-user', content: 'test', now: event.timestamp });
+  let injectCalls = 0;
+  const dispatcher = new EventDispatcher({
+    config: { ...container.config, wechat: { ...container.config.wechat, injectEnabled: false } },
+    orchestrator: container.orchestrator,
+    reminderService: new ReminderService({ reminderRepository: container.repositories.reminderRepository }),
+    eventRepository: container.repositories.eventRepository,
+    injector: { async enqueue() { injectCalls += 1; return { queued: false }; } },
+  });
+  assert.equal(await dispatcher.retryPendingOutbounds(), 0);
+  const outbound = container.repositories.eventRepository.outbound('worker-owned-outbound');
+  assert.equal(injectCalls, 0);
+  assert.equal(outbound.status, 'pending');
+  assert.equal(outbound.retry_count, 0);
+});
+
 test('recent conversation and food clarification pending interaction close without another vision call', async (t) => {
   const fixture = createTestDb(); t.after(fixture.cleanup);
   let visionCalls = 0;

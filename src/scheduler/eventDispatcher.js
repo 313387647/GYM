@@ -31,6 +31,7 @@ class EventDispatcher {
     return transition;
   }
   async retryPendingOutbounds() {
+    if (!this.config.wechat.injectEnabled) return 0;
     const options = { maxRetries: this.config.outbound.maxRetries, retryBaseMs: this.config.outbound.retryBaseMs };
     this.eventRepository.recoverStaleOutbounds(new Date(Date.now() - 10 * 60 * 1000).toISOString(), new Date().toISOString(), options.maxRetries);
     let queued = 0;
