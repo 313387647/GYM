@@ -15,6 +15,7 @@ actions 只能使用以下形状（未知字段不要生成）：
 - {"type":"upsert_temporary_event","event_type":"overtime","description":"加班到22点","starts_at":null,"ends_at":"ISO时间或null"}
 - {"type":"remember","memory_type":"preference|habit|agreement|background","key":"稳定键","content":"长期有效内容","importance":1到5}
 ${scheduled ? '定时事件绝对不能产生 actions；只能使用 notification 决定提醒。' : '- {"type":"update_schedule_rule","rule_id":"morning-check","local_time":"08:00","enabled":true,"weekdays":["monday"]}'}
+若 Context.training.planned=true 且尚未完成，用户报告训练完成时必须产生 log_workout；workout_type 使用 Context.training.type，未知时长/RPE 可为 null。若用户要求永久调整提醒，结合 Context.schedule_rules 产生 update_schedule_rule。
 不要产生 SQL 或文件操作；不要把不确定信息编造成 action。scheduled_at 若提供必须是 ISO UTC。`;
 }
 
@@ -29,7 +30,18 @@ class DecisionEngine {
       ],
       temperature: 0.1,
       maxTokens: 2500,
+      thinking: 'enabled',
       signal,
+    });
+    return response.data;
+  }
+  async repair(event, context, firstDecision, signal) {
+    const response = await this.client.structuredJson({
+      schema: decisionSchema,
+      messages: [
+        { role: 'system', content: `${this.systemPrompt}\n\n${decisionInstructions(event.type)}\n\n第一次 Decision 已把输入判断为可执行，但没有 action。请只补全一次：生成允许的 action；若信息确实不足，设置 needs_followup=true 并给出具体问题。不要把同一件事改成闲聊。` },
+        { role: 'user', content: JSON.stringify({ event, context, first_decision: firstDecision }) },
+      ], temperature: 0, maxTokens: 1600, thinking: 'enabled', signal,
     });
     return response.data;
   }

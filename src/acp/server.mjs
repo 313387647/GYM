@@ -4,12 +4,14 @@ import { Readable, Writable } from 'node:stream';
 import crypto from 'node:crypto';
 import containerModule from '../container.js';
 import normalizeModule from '../integrations/wechat/normalizeMessage.js';
+import identityModule from '../integrations/wechat/identity.js';
 import idModule from '../utils/id.js';
 import migrateModule from '../db/migrate.js';
 import configModule from '../config.js';
 
 const { createContainer } = containerModule;
 const { normalizePrompt } = normalizeModule;
+const { resolveUserId } = identityModule;
 const { stableId } = idModule;
 const { migrate } = migrateModule;
 const { loadConfig } = configModule;
@@ -55,7 +57,7 @@ const app = acp.agent({ name: 'gym-coach-v2' })
       const event = {
         id: stableId('evt', 'wechat', normalized.messageId),
         type: normalized.type,
-        user_id: ctx.params._meta?.wechatUserId || ctx.params.sessionId,
+        user_id: resolveUserId(ctx.params._meta, container.config),
         timestamp: new Date().toISOString(),
         payload: normalized.payload,
       };

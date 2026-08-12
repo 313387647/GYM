@@ -53,7 +53,10 @@ function loadConfig(overrides = {}) {
       textModel: env.MIMO_TEXT_MODEL || env.MIMO_MODEL || 'mimo-v2.5',
       visionModel: env.MIMO_VISION_MODEL || env.MIMO_MODEL || 'mimo-v2.5',
       timeoutMs: Number(env.MIMO_TIMEOUT_MS || 60000),
+      visionTimeoutMs: Number(env.MIMO_VISION_TIMEOUT_MS || 45000),
       maxRetries: Number(env.MIMO_MAX_RETRIES || 2),
+      visionDiagnosticsEnabled: /^(1|true|yes)$/i.test(env.MIMO_VISION_DIAGNOSTICS || ''),
+      diagnosticsDir: path.join(dataDir, 'integration', 'diagnostics'),
     },
     scheduler: {
       enabled: !/^(0|false|no)$/i.test(env.SCHEDULER_ENABLED || 'true'),

@@ -40,7 +40,7 @@ services:
       - gym-data:/app/data
       - wechat-state:/wechat-state
       - ./config.json:/app/config.json:ro
-    command: ["wechat-acp", "--instance", "gym", "--agent", "npm run acp", "--cwd", "/app", "--inbox-dir", "/app/data/inbox", "--hide-thoughts", "--session-resume", "auto"]
+    command: ["wechat-acp", "--instance", "gym", "--agent", "node src/acp/server.mjs", "--cwd", "/app", "--inbox-dir", "/app/data/inbox", "--hide-thoughts"]
   wechat-delivery-worker:
     build:
       context: .

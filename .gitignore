@@ -58,6 +58,7 @@ data/training.json
 data/daily/
 data/pending/
 data/inbox/
+data/integration/
 data/*.log
 *.log
 

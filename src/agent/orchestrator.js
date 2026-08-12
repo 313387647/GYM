@@ -13,9 +13,15 @@ function cancelled(signal) {
 }
 
 const foodRecalibrationSchema = z.object({
-  items: z.array(mealItemSchema).min(1).max(20),
+  items: z.array(mealItemSchema).max(20).default([]),
   needs_clarification: z.boolean().default(false),
   clarification_question: z.string().max(300).nullish(),
+}).refine((value) => value.needs_clarification || value.items.length > 0, 'items are required unless clarification is requested');
+
+const foodDraftRelationSchema = z.object({
+  relation: z.enum(['attach', 'unrelated', 'ambiguous']),
+  cancel_draft: z.boolean().default(false),
+  reason: z.string().max(240).nullish(),
 });
 
 function inputKind(text) {
@@ -28,6 +34,17 @@ function inputKind(text) {
 function ambiguousTotalWeight(text, items) {
   return items.length > 1 && /^\s*\d+(?:\.\d+)?\s*(?:g|克)\s*(?:左右)?\s*$/i.test(String(text));
 }
+
+function isRpeOnly(text) { return /^(?:rpe\s*)?(?:10|[1-9])(?:\s*分)?$/i.test(String(text).trim()); }
+function needsRepair(decision, context, text) {
+  const trainingCompletion = context.state.training.planned && !context.state.training.completed
+    && /(?:训练|练).*(?:完|结束)|(?:完|结束).*(?:训练|练)/.test(String(text));
+  if (trainingCompletion && !decision.actions.length) return true;
+  if (decision.needs_followup || decision.actions.length) return false;
+  if (['record', 'multi_action', 'status_update', 'plan_change'].includes(decision.intent)) return true;
+  return false;
+}
+function looksLikeFoodDraftReply(text) { return Boolean(String(text).trim()) && !isRpeOnly(text); }
 
 class Orchestrator {
   constructor(dependencies) { Object.assign(this, dependencies); }
@@ -48,10 +65,11 @@ class Orchestrator {
       let responseOverride = null;
 
       if (pendingResult) ({ decision, actionResults, responseOverride } = pendingResult);
-      else if (event.type === 'image_received') ({ decision, actionResults } = await this.handleImage(event, initialContext, userIdHash, signal));
+      else if (event.type === 'image_received') ({ decision, actionResults, responseOverride } = await this.handleImage(event, initialContext, userIdHash, signal));
       else {
         const cached = stored.decision && decisionSchema.safeParse(stored.decision);
         decision = cached?.success ? cached.data : await this.decisionEngine.decide(event, initialContext, signal);
+        if (!cached?.success && needsRepair(decision, initialContext, event.payload.text)) decision = await this.decisionEngine.repair(event, initialContext, decision, signal);
         if (!cached?.success) this.eventRepository.saveDecision(event.id, decision);
         cancelled(signal);
         actionResults = this.actionExecutor.execute(decision.actions, { event, context: initialContext, signal });
@@ -76,6 +94,18 @@ class Orchestrator {
   }
 
   async completePending(event, context, userIdHash, signal) {
+    const draft = this.pendingInteractionRepository.activeFoodDraft(userIdHash, event.timestamp);
+    if (draft && looksLikeFoodDraftReply(event.payload.text)) {
+      const relation = await this.resolveFoodDraftRelation(draft, event, userIdHash, signal);
+      if (relation.cancel_draft) {
+        this.pendingInteractionRepository.cancel(draft.id, event.timestamp);
+        return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '用户取消图片饮食草稿', tone: 'neutral' }, actionResults: [], responseOverride: '好的，刚才那张图片不记了。' };
+      }
+      if (relation.relation === 'attach') return this.fuseFoodDraft(draft, event, context, signal);
+      if (relation.relation === 'ambiguous') {
+        return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '你是在补充刚才那张饭图吗？', response_goal: '澄清图片草稿与当前文字的关系', tone: 'neutral' }, actionResults: [], responseOverride: '你是在补充刚才那张饭图吗？' };
+      }
+    }
     const kind = inputKind(event.payload.text);
     if (!kind) return null;
     const pending = this.pendingInteractionRepository.active(userIdHash, kind, event.timestamp);
@@ -90,9 +120,9 @@ class Orchestrator {
       const recalibration = await this.client.structuredJson({
         schema: foodRecalibrationSchema,
         messages: [
-          { role: 'system', content: '你是谨慎的营养校准器。根据已有图片分析和用户补充的份量重新估算每个食物的 amount、calories、protein_g、carbs_g、fat_g。不要沿用旧营养数字；不清楚时要求澄清。只输出 JSON。' },
+          { role: 'system', content: '你是谨慎的营养校准器。根据已有图片分析和用户补充的份量重新估算。只输出此 JSON 对象：{"items":[{"name":"","amount":"","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"confidence":"high|medium|low"}],"needs_clarification":false,"clarification_question":null}。不要输出菜品介绍、category、ingredients 等其他字段；不要沿用旧营养数字；不清楚时设置 needs_clarification=true。' },
           { role: 'user', content: JSON.stringify({ original_analysis: analysis, quantity_description: event.payload.text }) },
-        ], temperature: 0.1, maxTokens: 1400, signal,
+        ], temperature: 0.1, maxTokens: 1400, thinking: 'disabled', responseFormat: { type: 'json_object' }, signal,
       });
       if (recalibration.data.needs_clarification) {
         return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: recalibration.data.clarification_question || '这个份量是指整份还是其中某一种食物？', response_goal: '继续澄清图片饮食份量', tone: 'neutral' }, actionResults: [], responseOverride: recalibration.data.clarification_question || '这个份量是指整份还是其中某一种食物？' };
@@ -113,6 +143,41 @@ class Orchestrator {
     return null;
   }
 
+  async resolveFoodDraftRelation(draft, event, userIdHash, signal) {
+    const payload = draft.payload;
+    const ageMinutes = Math.max(0, Math.round((Date.parse(event.timestamp) - Date.parse(draft.created_at)) / 60000));
+    const response = await this.client.structuredJson({
+      schema: foodDraftRelationSchema,
+      messages: [
+        { role: 'system', content: '判断用户当前文字与一个未过期的图片饮食草稿的关系。relation 只能是 attach、unrelated、ambiguous。食物名称、份量、确认、修正通常 attach；未来计划、体重、工作、训练通常 unrelated；无法判断则 ambiguous。若用户明确说不记/不用管/算了，cancel_draft=true。只输出 JSON。' },
+        { role: 'user', content: JSON.stringify({ user_text: event.payload.text, draft_age_minutes: ageMinutes, vision_summary: { items: payload.analysis.items, confidence: payload.analysis.confidence, notes: payload.analysis.notes || null }, image_caption: payload.caption || null, recent_conversation: this.conversationRepository.recent(userIdHash, 6) }) },
+      ], temperature: 0, maxTokens: 400, thinking: 'disabled', responseFormat: { type: 'json_object' }, signal,
+    });
+    return { relation: response.data.relation || 'attach', cancel_draft: Boolean(response.data.cancel_draft), reason: response.data.reason || null };
+  }
+
+  async fuseFoodDraft(draft, event, context, signal) {
+    const payload = draft.payload;
+    if (ambiguousTotalWeight(event.payload.text, payload.analysis.items)) {
+      return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '300g 是整份，还是其中某一种食物？', response_goal: '澄清多食物图片的份量归属', tone: 'neutral' }, actionResults: [], responseOverride: '300g 是整份，还是其中某一种食物？' };
+    }
+    const fusion = await this.client.structuredJson({
+      schema: foodRecalibrationSchema,
+      messages: [
+        { role: 'system', content: '你是谨慎的图片饮食融合器。用户后续文字是优先事实，Vision 只作视觉辅助。只输出此 JSON 对象：{"items":[{"name":"","amount":"","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"confidence":"high|medium|low"}],"needs_clarification":false,"clarification_question":null}。不要输出菜品介绍、category、ingredients 等其他字段；不能机械保留视觉误识别。若文字仍不足以确认，needs_clarification=true。' },
+        { role: 'user', content: JSON.stringify({ vision_analysis: payload.analysis, image: { image_hash: payload.image_hash, caption: payload.caption || null }, user_description: event.payload.text, meal_context: context.today }) },
+      ], temperature: 0.1, maxTokens: 1400, thinking: 'disabled', responseFormat: { type: 'json_object' }, signal,
+    });
+    if (fusion.data.needs_clarification) {
+      return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: fusion.data.clarification_question || '这顿具体是什么、份量大概多少？', response_goal: '继续澄清图片饮食', tone: 'neutral' }, actionResults: [], responseOverride: fusion.data.clarification_question || '这顿具体是什么、份量大概多少？' };
+    }
+    const result = this.mealService.logMeal({ actionKey: `${event.id}:food-fusion`, logicalDate: context.time.logical_date,
+      mealType: payload.meal_type || 'other', items: fusion.data.items, sourceEventId: event.id,
+      sourceMessageId: payload.source_message_id, imageHash: payload.image_hash, recordedAt: event.timestamp });
+    this.pendingInteractionRepository.complete(draft.id, event.timestamp);
+    return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '已根据图片和用户描述确认并记录饮食', tone: 'neutral' }, actionResults: [result], responseOverride: '收到，已经按你补充的描述重新确认并记好了。' };
+  }
+
   createRpeFollowup(event, userIdHash, results, decision) {
     const workout = results.find((result) => result?.workout)?.workout;
     if (workout && !workout.rpe_score) {
@@ -123,14 +188,22 @@ class Orchestrator {
   }
 
   async handleImage(event, context, userIdHash, signal) {
+    const imageHash = this.foodVision.imageHash?.(event.payload.path);
+    if (imageHash && this.mealService.repository.getImageIngestion(imageHash)) {
+      return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '此图片已记录，不重复入库', tone: 'neutral' }, actionResults: [], responseOverride: '这张图已经记过了，我不会重复记账。' };
+    }
+    const existingDraft = imageHash && this.pendingInteractionRepository.activeFoodDraftByImageHash(userIdHash, imageHash, event.timestamp);
+    if (existingDraft) {
+      return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '这张图还在等你确认是什么或大概份量。', response_goal: '复用已有图片饮食草稿，不重复视觉分析', tone: 'neutral' }, actionResults: [], responseOverride: '这张图还在等你确认是什么或大概份量，我不会重复分析或记账。' };
+    }
     const analysis = await this.foodVision.analyze(event.payload.path, { signal });
     if (!analysis.is_food) return { decision: { intent: 'chat', actions: [], needs_followup: false, response_goal: '自然说明这不是食物图片，不进行饮食记录', tone: 'neutral' }, actionResults: [] };
-    if (analysis.confidence === 'low' || analysis.needs_clarification) {
-      this.pendingInteractionRepository.create({ userIdHash, kind: 'food_quantity', payload: { analysis, image_hash: analysis.image_hash, message_id: event.payload.message_id, meal_type: event.payload.meal_type }, sourceEventId: event.id, now: event.timestamp });
-      return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: analysis.clarification_question || '这张图的份量看不太准，你能告诉我大概多少克吗？我确认后再记录。', response_goal: '说明未自动入库并询问份量', tone: 'neutral' }, actionResults: [] };
-    }
-    const result = this.mealService.logMeal({ actionKey: `${event.id}:image`, logicalDate: context.time.logical_date, mealType: event.payload.meal_type || 'other', items: analysis.items, sourceEventId: event.id, sourceMessageId: event.payload.message_id, imageHash: analysis.image_hash, recordedAt: event.timestamp });
-    return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: `图片饮食已分析并记录。识别说明：${analysis.notes || '无'}`, tone: 'neutral' }, actionResults: [result] };
+    if (this.mealService.repository.getImageIngestion(analysis.image_hash)) return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '此图片已记录，不重复入库', tone: 'neutral' }, actionResults: [], responseOverride: '这张图已经记过了，我不会重复记账。' };
+    const draft = this.pendingInteractionRepository.activeFoodDraftByImageHash(userIdHash, analysis.image_hash, event.timestamp)
+      || this.pendingInteractionRepository.create({ userIdHash, kind: 'food_image_draft', payload: { analysis, image_hash: analysis.image_hash, source_message_id: event.payload.message_id, caption: event.payload.caption || null, meal_type: event.payload.meal_type }, sourceEventId: event.id, now: event.timestamp });
+    if (event.payload.caption?.trim()) return this.fuseFoodDraft(draft, { ...event, payload: { ...event.payload, text: event.payload.caption } }, context, signal);
+    const names = analysis.items.slice(0, 3).map((item) => item.name).join('、') || '一顿食物';
+    return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '这顿具体是什么或者大概多少？', response_goal: '图片已保存为草稿，等待用户确认后再入库', tone: 'neutral' }, actionResults: [], responseOverride: `图我看到了，我先没直接记账。看起来像 ${names}；你补一句是什么或者大概份量，我再记准一点。` };
   }
 }
-module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, inputKind, ambiguousTotalWeight };
+module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, foodDraftRelationSchema, inputKind, ambiguousTotalWeight, needsRepair };

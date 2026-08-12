@@ -20,4 +20,5 @@ test('context builder combines DB facts, plan, timezone, memory and reminders', 
   assert.equal(context.state.training.type, 'upper_a');
   assert.equal(context.memory[0].key, 'style');
   assert.ok(Array.isArray(context.today.meals));
+  assert.ok(context.schedule_rules.some((rule) => rule.id === 'morning-check'));
 });

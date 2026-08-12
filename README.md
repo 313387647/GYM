@@ -140,11 +140,10 @@ V2 针对官方 `wechat-acp` 0.10.x 的能力设计。官方已经支持 custom 
 ```bash
 npx --yes wechat-acp@0.10.0 \
   --instance gym \
-  --agent "npm run acp" \
+  --agent "node src/acp/server.mjs" \
   --cwd "$PWD" \
   --inbox-dir "$PWD/data/inbox" \
-  --hide-thoughts \
-  --session-resume auto
+  --hide-thoughts
 ```
 
 第一次会显示二维码。扫码后，微信文字或图片会进入同一个 Orchestrator。图片文件只能从配置允许的 inbox 读取；路径越界会被拒绝。
@@ -198,7 +197,7 @@ docker compose up gym-core
 `docker-compose.yml` 预先定义了三个服务：
 
 - `gym-core`：HTTP healthcheck、migration 与持久化 Scheduler；它只写 SQLite/outbound queue，不直接操作 wechat-acp state。
-- `wechat-bridge`：固定 `wechat-acp@0.10.0`，通过 ACP stdio 运行 `npm run acp`，负责收取微信消息。
+- `wechat-bridge`：固定 `wechat-acp@0.10.0`，通过 ACP stdio 直接运行 `node src/acp/server.mjs`，避免 npm 的标准输出混入 ACP 协议流，负责收取微信消息。
 - `wechat-delivery-worker`：从同一 SQLite 的 pending outbound queue 有限重试，并通过同一 wechat-acp instance 注入消息。
 
 `gym-data` 持久化 SQLite 与 inbox，`wechat-state` 持久化 wechat-acp 的 HOME/session。bridge 与 delivery worker 同时挂载这两个 volume，instance 均为 `gym`，因此 Scheduler 的提醒不会落到另一份独立登录状态。运行时不使用 `npx` 下载最新版；镜像构建时固定安装 `wechat-acp@0.10.0`。镜像以非 root 用户运行，gym-core 带 healthcheck。

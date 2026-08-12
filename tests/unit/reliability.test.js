@@ -9,11 +9,18 @@ const { ReminderService } = require('../../src/services/reminderService');
 const { normalizePrompt } = require('../../src/integrations/wechat/normalizeMessage');
 const { LlmTimeoutError } = require('../../src/integrations/llm/errors');
 const { OutboundDeliveryWorker } = require('../../src/integrations/wechat/outboundWorker');
+const { resolveUserId } = require('../../src/integrations/wechat/identity');
+const { foodDraftRelationSchema } = require('../../src/agent/orchestrator');
 
 const weightAndMeal = { intent: 'multi_action', actions: [
   { type: 'log_weight', weight_kg: 96.4 },
   { type: 'log_meal', meal_type: 'lunch', items: [{ name: '牛肉面', calories: 650, protein_g: 35 }] },
 ], needs_followup: false, response_goal: '记录', tone: 'neutral' };
+
+test('ACP uses a stable configured user id when the transport does not provide one', () => {
+  assert.equal(resolveUserId(undefined, { defaultUserId: 'primary-user' }), 'primary-user');
+  assert.equal(resolveUserId({ wechatUserId: 'wechat-user' }, { defaultUserId: 'primary-user' }), 'wechat-user');
+});
 
 test('event retry reuses persisted decision and continues after a later action failure', async (t) => {
   const fixture = createTestDb(); t.after(fixture.cleanup);
@@ -82,20 +89,164 @@ test('food quantity clarification recalibrates nutrition through text model with
   await container.orchestrator.handle({ id: 'recal-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'm', meal_type: 'lunch' } });
   await container.orchestrator.handle({ id: 'recal-answer', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '鸡肉约200g' } });
   const meal = fixture.db.prepare('SELECT calories, protein_g, item_name FROM meals').get();
-  assert.equal(visionCalls, 1); assert.equal(calibrationCalls, 1);
+  assert.equal(visionCalls, 1); assert.equal(calibrationCalls, 2);
   assert.deepEqual(meal, { calories: 260, protein_g: 50, item_name: '鸡肉' });
 });
 
 test('ambiguous multi-item total weight remains pending instead of assigning it to every item', async (t) => {
   const fixture = createTestDb(); t.after(fixture.cleanup);
   const foodVision = { async analyze() { return { is_food: true, confidence: 'low', needs_clarification: true, items: [{ name: '鸡肉', calories: 200, protein_g: 30 }, { name: '米饭', calories: 300, protein_g: 5 }], image_hash: 'multi-image' }; } };
-  const client = { async structuredJson() { throw new Error('must not calibrate ambiguous total'); }, async text() { return { content: '收到。' }; } };
+  const client = { async structuredJson({ schema }) { if (schema === foodDraftRelationSchema) return { data: { relation: 'attach', cancel_draft: false } }; throw new Error('must not calibrate ambiguous total'); }, async text() { return { content: '收到。' }; } };
   const container = createTestContainer(fixture, { foodVision, client });
   await container.orchestrator.handle({ id: 'multi-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'm', meal_type: 'lunch' } });
   const result = await container.orchestrator.handle({ id: 'multi-answer', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '300g' } });
   assert.match(result.response, /整份/);
   assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
-  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_quantity', '2026-08-10T04:01:00.000Z').status, 'active');
+  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_image_draft', '2026-08-10T04:01:00.000Z').status, 'active');
+});
+
+test('food image is held as a draft and nearby user description replaces incorrect vision before one meal write', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let visionCalls = 0; let fusionCalls = 0; let relationCalls = 0; const structuredOptions = [];
+  const foodVision = { async analyze() { visionCalls += 1; return { is_food: true, confidence: 'high', needs_clarification: false, items: [{ name: '错误识别', amount: '1份', calories: 999, protein_g: 1 }], image_hash: 'wrong-vision-image' }; } };
+  const client = {
+    async structuredJson(input) {
+      const { schema } = input;
+      structuredOptions.push(input);
+      if (schema === foodDraftRelationSchema) { relationCalls += 1; return { data: { relation: 'attach', cancel_draft: false } }; }
+      fusionCalls += 1; return { data: { items: [{ name: '小锅米线', amount: '1碗', calories: 520, protein_g: 21, carbs_g: 75, fat_g: 16 }] } };
+    },
+    async text() { return { content: '收到。' }; },
+  };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'draft-only-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'image-1', meal_type: 'lunch' } });
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
+  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_image_draft', '2026-08-10T04:01:00.000Z').status, 'active');
+  await container.orchestrator.handle({ id: 'draft-description', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:01:00.000Z', payload: { text: '吃小锅米线' } });
+  const meal = fixture.db.prepare('SELECT item_name, calories FROM meals').get();
+  assert.equal(visionCalls, 1); assert.equal(relationCalls, 1); assert.equal(fusionCalls, 1);
+  assert.deepEqual(meal, { item_name: '小锅米线', calories: 520 });
+  assert.equal(structuredOptions.every((input) => input.thinking === 'disabled'), true);
+  assert.equal(structuredOptions.every((input) => input.responseFormat?.type === 'json_object'), true);
+});
+
+test('duplicate image event does not create another draft, vision call, or meal', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let visionCalls = 0;
+  const foodVision = { imageHash() { return 'same-image'; }, async analyze() { visionCalls += 1; return { is_food: true, confidence: 'high', items: [{ name: '米线', calories: 500, protein_g: 20 }], image_hash: 'same-image' }; } };
+  const container = createTestContainer(fixture, { foodVision });
+  const image = { id: 'same-image-event', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'image-same', meal_type: 'lunch' } };
+  await container.orchestrator.handle(image);
+  await container.orchestrator.handle({ ...image, id: 'same-image-retry', timestamp: '2026-08-10T04:01:00.000Z' });
+  assert.equal(visionCalls, 1);
+  assert.equal(fixture.db.prepare("SELECT COUNT(*) count FROM pending_interactions WHERE kind='food_image_draft'").get().count, 1);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
+});
+
+test('a seven-minute explicit food description attaches to the active image draft and preserves image hash', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const foodVision = { async analyze() { return { is_food: true, confidence: 'medium', items: [{ name: '凉皮', calories: 260, protein_g: 6 }], image_hash: 'seven-minute-image' }; } };
+  const client = { async structuredJson({ schema }) {
+    if (schema === foodDraftRelationSchema) return { data: { relation: 'attach', cancel_draft: false } };
+    return { data: { items: [{ name: '小锅米线', amount: '1碗', calories: 520, protein_g: 20, carbs_g: 70, fat_g: 15 }] } };
+  }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'draft-seven-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'photo', meal_type: 'lunch' } });
+  await container.orchestrator.handle({ id: 'draft-seven-text', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:07:00.000Z', payload: { text: '吃小锅米线' } });
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 1);
+  assert.equal(fixture.db.prepare('SELECT image_hash FROM meals').get().image_hash, 'seven-minute-image');
+  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_image_draft', '2026-08-10T04:08:00.000Z'), null);
+  assert.equal(fixture.db.prepare("SELECT status FROM pending_interactions WHERE source_event_id='draft-seven-image'").get().status, 'completed');
+});
+
+test('a thirty-minute explicit correction attaches, while an unrelated future meal leaves its draft active', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const foodVision = { async analyze() { return { is_food: true, confidence: 'medium', items: [{ name: '米皮', calories: 300, protein_g: 8 }], image_hash: 'relation-image' }; } };
+  const client = { async structuredJson({ schema, messages }) {
+    if (schema === foodDraftRelationSchema) {
+      const text = JSON.parse(messages[1].content).user_text;
+      return { data: { relation: text.includes('晚上想') ? 'unrelated' : 'attach', cancel_draft: false } };
+    }
+    if (String(messages[1]?.content).includes('vision_analysis')) {
+      return { data: { items: [{ name: '麻酱凉皮', amount: '一小份', calories: 300, protein_g: 8, carbs_g: 35, fat_g: 15 }] } };
+    }
+    return { data: { intent: 'chat', actions: [], needs_followup: false, response_goal: '普通聊天', tone: 'neutral' } };
+  }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'relation-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'photo', meal_type: 'lunch' } });
+  await container.orchestrator.handle({ id: 'relation-unrelated', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:15:00.000Z', payload: { text: '晚上想吃牛肉面' } });
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
+  assert.ok(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'food_image_draft', '2026-08-10T04:15:00.000Z'));
+  await container.orchestrator.handle({ id: 'relation-attach', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:30:00.000Z', payload: { text: '这是麻酱凉皮，一小份' } });
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 1);
+  assert.equal(fixture.db.prepare("SELECT status FROM pending_interactions WHERE source_event_id='relation-image'").get().status, 'completed');
+});
+
+test('ambiguous draft relation never writes a standalone meal and explicit cancellation cancels the draft', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let relation = 'ambiguous';
+  const foodVision = { async analyze() { return { is_food: true, confidence: 'medium', items: [{ name: '食物', calories: 100, protein_g: 5 }], image_hash: 'cancel-image' }; } };
+  const client = { async structuredJson({ schema }) {
+    if (schema === foodDraftRelationSchema) return { data: { relation: relation === 'cancel' ? 'unrelated' : relation, cancel_draft: relation === 'cancel' } };
+    throw new Error('fusion must not run');
+  }, async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, client });
+  await container.orchestrator.handle({ id: 'cancel-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { path: '/ignored', message_id: 'photo', meal_type: 'lunch' } });
+  const ambiguous = await container.orchestrator.handle({ id: 'ambiguous-reply', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:20:00.000Z', payload: { text: '差不多' } });
+  assert.match(ambiguous.response, /刚才那张饭图/);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM meals').get().count, 0);
+  relation = 'cancel';
+  await container.orchestrator.handle({ id: 'cancel-reply', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:21:00.000Z', payload: { text: '刚才那张不用记了' } });
+  assert.equal(fixture.db.prepare("SELECT status FROM pending_interactions WHERE source_event_id='cancel-image'").get().status, 'cancelled');
+});
+
+test('one decision repair turns an actionable empty plan change into a persisted schedule mutation', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let calls = 0;
+  const client = {
+    async structuredJson() {
+      calls += 1;
+      return { data: calls === 1
+        ? { intent: 'plan_change', actions: [], needs_followup: false, response_goal: '调整提醒', tone: 'neutral' }
+        : { intent: 'plan_change', actions: [{ type: 'update_schedule_rule', rule_id: 'morning-check', local_time: '08:00' }], needs_followup: false, response_goal: '已调整', tone: 'neutral' } };
+    },
+    async text() { return { content: '已调整。' }; },
+  };
+  const container = createTestContainer(fixture, { client });
+  await container.orchestrator.handle({ id: 'repair-schedule', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { text: '以后早上八点提醒我' } });
+  assert.equal(calls, 2);
+  assert.equal(container.repositories.scheduleRepository.get('morning-check').local_time, '08:00');
+});
+
+test('decision repair runs at most once when the repaired result is still empty', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let calls = 0;
+  const client = {
+    async structuredJson() { calls += 1; return { data: { intent: 'plan_change', actions: [], needs_followup: false, response_goal: '调整提醒', tone: 'neutral' } }; },
+    async text() { return { content: '需要更多信息。' }; },
+  };
+  const container = createTestContainer(fixture, { client });
+  await container.orchestrator.handle({ id: 'repair-once', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { text: '以后早上八点提醒我' } });
+  assert.equal(calls, 2);
+});
+
+test('training completion gets one repair, writes workout, and creates an RPE pending interaction', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  let calls = 0;
+  const client = {
+    async structuredJson() {
+      calls += 1;
+      return { data: calls === 1
+        ? { intent: 'chat', actions: [], needs_followup: true, followup_question: '训练做了什么？', response_goal: '闲聊', tone: 'neutral' }
+        : { intent: 'record', actions: [{ type: 'log_workout', workout_type: 'upper_a', total_duration_min: 60 }], needs_followup: false, response_goal: '记录训练', tone: 'neutral' } };
+    },
+    async text() { return { content: '训练已记。' }; },
+  };
+  const container = createTestContainer(fixture, { client });
+  await container.orchestrator.handle({ id: 'repair-workout', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:00:00.000Z', payload: { text: '今天训练做完了' } });
+  assert.equal(calls, 2);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM workouts').get().count, 1);
+  assert.ok(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'workout_rpe', '2026-08-10T04:01:00.000Z'));
 });
 
 test('pending interactions expire and numeric RPE prefers workout pending over food pending', async (t) => {
@@ -138,6 +289,9 @@ test('Docker gives migration ownership only to healthy gym-core', () => {
   assert.match(compose, /gym-core:[\s\S]*GYM_MIGRATE_ON_START: "true"/);
   assert.equal((compose.match(/GYM_MIGRATE_ON_START: "false"/g) || []).length, 2);
   assert.equal((compose.match(/condition: service_healthy/g) || []).length, 2);
+  assert.match(compose, /--agent", "node src\/acp\/server\.mjs"/);
+  assert.doesNotMatch(compose, /--agent", "npm run acp"/);
+  assert.doesNotMatch(compose, /session-resume/);
 });
 
 test('RPE follow-up updates the existing workout instead of inserting another', async (t) => {
