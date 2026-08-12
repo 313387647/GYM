@@ -30,7 +30,7 @@ class DecisionEngine {
       ],
       temperature: 0.1,
       maxTokens: 2500,
-      thinking: 'enabled',
+      thinking: 'disabled',
       signal,
     });
     return response.data;
@@ -41,7 +41,7 @@ class DecisionEngine {
       messages: [
         { role: 'system', content: `${this.systemPrompt}\n\n${decisionInstructions(event.type)}\n\n第一次 Decision 已把输入判断为可执行，但没有 action。请只补全一次：生成允许的 action；若信息确实不足，设置 needs_followup=true 并给出具体问题。不要把同一件事改成闲聊。` },
         { role: 'user', content: JSON.stringify({ event, context, first_decision: firstDecision }) },
-      ], temperature: 0, maxTokens: 1600, thinking: 'enabled', signal,
+      ], temperature: 0, maxTokens: 1600, thinking: 'disabled', signal,
     });
     return response.data;
   }

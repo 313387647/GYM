@@ -11,6 +11,7 @@ const { LlmTimeoutError } = require('../../src/integrations/llm/errors');
 const { OutboundDeliveryWorker } = require('../../src/integrations/wechat/outboundWorker');
 const { resolveUserId } = require('../../src/integrations/wechat/identity');
 const { foodDraftRelationSchema } = require('../../src/agent/orchestrator');
+const { DecisionEngine } = require('../../src/agent/decisionEngine');
 
 const weightAndMeal = { intent: 'multi_action', actions: [
   { type: 'log_weight', weight_kg: 96.4 },
@@ -20,6 +21,20 @@ const weightAndMeal = { intent: 'multi_action', actions: [
 test('ACP uses a stable configured user id when the transport does not provide one', () => {
   assert.equal(resolveUserId(undefined, { defaultUserId: 'primary-user' }), 'primary-user');
   assert.equal(resolveUserId({ wechatUserId: 'wechat-user' }, { defaultUserId: 'primary-user' }), 'wechat-user');
+});
+
+test('agent decision and repair disable thinking for deterministic JSON', async () => {
+  const requests = [];
+  const client = { async structuredJson(input) {
+    requests.push(input);
+    return { data: { intent: 'chat', actions: [], needs_followup: false, response_goal: '测试', tone: 'neutral' } };
+  } };
+  const engine = new DecisionEngine({ client });
+  const event = { type: 'user_message', payload: { text: '测试一下' } };
+  await engine.decide(event, {}, undefined);
+  await engine.repair(event, {}, requests[0].data, undefined);
+  assert.equal(requests.length, 2);
+  assert.equal(requests.every((request) => request.thinking === 'disabled'), true);
 });
 
 test('event retry reuses persisted decision and continues after a later action failure', async (t) => {
