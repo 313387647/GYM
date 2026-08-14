@@ -1,7 +1,14 @@
 FROM node:20-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm install --global wechat-acp@0.10.0
+RUN sed -i 's|URIs: http://deb.debian.org/debian$|URIs: http://ftp.debian.org/debian|' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
+    && (apt-get -o Acquire::Retries=3 install -y --no-install-recommends python3 make g++ \
+        || apt-get -o Acquire::Retries=3 install -y --fix-missing --no-install-recommends python3 make g++) \
+    && npm ci --omit=dev \
+    && npm install --global wechat-acp@0.10.0 \
+    && apt-get purge -y --auto-remove python3 make g++ \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY src ./src
 COPY prompts ./prompts
 COPY plan.json config.example.json ./

@@ -1,6 +1,11 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+RUN sed -i 's|URIs: http://deb.debian.org/debian$|URIs: http://ftp.debian.org/debian|' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 update \
+    && (apt-get -o Acquire::Retries=3 install -y --no-install-recommends python3 make g++ \
+        || apt-get -o Acquire::Retries=3 install -y --fix-missing --no-install-recommends python3 make g++) \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm ci --omit=dev
 
 FROM node:20-bookworm-slim
