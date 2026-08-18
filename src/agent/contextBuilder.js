@@ -23,6 +23,7 @@ class ContextBuilder {
       user: { ...this.config.user, id_hash: userIdHash },
       targets: this.planService.getTargets(),
       state,
+      training_plan: this.planService.getTrainingOverview(),
       today: {
         weight: this.weightRepository.byDate(time.logical_date),
         meals: this.mealRepository.listByDate(time.logical_date).slice(-12),

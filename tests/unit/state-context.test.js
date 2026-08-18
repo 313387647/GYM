@@ -18,6 +18,8 @@ test('context builder combines DB facts, plan, timezone, memory and reminders', 
   const context = container.contextBuilder.build({ id: 'evt', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T03:00:00.000Z', payload: { text: 'hi' } });
   assert.equal(context.time.timezone, 'Asia/Shanghai');
   assert.equal(context.state.training.type, 'upper_a');
+  assert.deepEqual(context.training_plan.weekly_schedule, { monday: 'upper_a', wednesday: 'lower', friday: 'upper_b' });
+  assert.equal(context.training_plan.workouts.lower.name, 'Lower (Legs + Core)');
   assert.equal(context.memory[0].key, 'style');
   assert.ok(Array.isArray(context.today.meals));
   assert.ok(context.schedule_rules.some((rule) => rule.id === 'morning-check'));

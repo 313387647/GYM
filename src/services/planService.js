@@ -30,5 +30,16 @@ class PlanService {
     const type = schedule[weekday] || null;
     return type ? { planned: true, type, name: plan.workouts?.[type]?.name || type, workout: plan.workouts?.[type] || null } : { planned: false, type: null, name: null, workout: null };
   }
+  getTrainingOverview() {
+    const plan = this.getPlan();
+    const phase = this.getPhase();
+    const weeklySchedule = phase.training?.schedule || plan.phases?.phase_1?.training?.schedule || {};
+    const workoutTypes = [...new Set(Object.values(weeklySchedule))];
+    return {
+      phase: phase.name,
+      weekly_schedule: weeklySchedule,
+      workouts: Object.fromEntries(workoutTypes.map((type) => [type, plan.workouts?.[type] || { name: type, exercises: [] }])),
+    };
+  }
 }
 module.exports = { PlanService };
