@@ -23,7 +23,7 @@ function fakeClient() {
 
 function createTestContainer(testDb, overrides = {}) {
   const config = loadConfig({ GYM_DB_PATH: testDb.databasePath, WECHAT_INBOX_DIR: testDb.directory, WECHAT_ALLOWED_INBOX_ROOTS: testDb.directory });
-  return createContainer({ db: testDb.db, config, client: overrides.client || fakeClient(), foodVision: overrides.foodVision });
+  return createContainer({ db: testDb.db, config, client: overrides.client || fakeClient(), foodVision: overrides.foodVision, workoutVision: overrides.workoutVision });
 }
 
 module.exports = { createTestDb, createTestContainer, fakeClient };

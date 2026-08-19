@@ -2,6 +2,7 @@ const { loadConfig } = require('./config');
 const { getDB } = require('./db');
 const { MimoClient } = require('./integrations/llm/mimoClient');
 const { FoodVision } = require('./integrations/vision/foodVision');
+const { WorkoutVision } = require('./integrations/vision/workoutVision');
 const { MealRepository } = require('./repositories/mealRepository');
 const { WeightRepository } = require('./repositories/weightRepository');
 const { WorkoutRepository } = require('./repositories/workoutRepository');
@@ -49,11 +50,12 @@ function createContainer(options = {}) {
   const stateService = new StateService({ mealService, weightService, workoutService, lifeRepository, planService });
   const client = options.client || new MimoClient(config.mimo, options.mimoOptions);
   const foodVision = options.foodVision || new FoodVision({ client, allowedRoots: config.wechat.allowedInboxRoots });
+  const workoutVision = options.workoutVision || new WorkoutVision({ client, imageReader: foodVision });
   const contextBuilder = new ContextBuilder({ config, stateService, planService, mealRepository, weightRepository, memoryRepository, reminderRepository, scheduleRepository, conversationRepository, pendingInteractionRepository });
   const decisionEngine = new DecisionEngine({ client });
   const actionExecutor = new ActionExecutor({ mealService, weightService, workoutService, lifeService, memoryService, scheduleMutationService });
   const responseComposer = new ResponseComposer({ client });
-  const orchestrator = new Orchestrator({ client, contextBuilder, decisionEngine, actionExecutor, responseComposer, eventRepository, foodVision, mealService, workoutService, conversationRepository, pendingInteractionRepository });
-  return { config, db, client, foodVision, repositories: { mealRepository, weightRepository, workoutRepository, lifeRepository, memoryRepository, reminderRepository, eventRepository, scheduleRepository, conversationRepository, pendingInteractionRepository }, services: { planService, mealService, weightService, lifeService, memoryService, stateService, scheduleMutationService, workoutService }, contextBuilder, decisionEngine, actionExecutor, responseComposer, orchestrator };
+  const orchestrator = new Orchestrator({ client, contextBuilder, decisionEngine, actionExecutor, responseComposer, eventRepository, foodVision, workoutVision, mealService, workoutService, conversationRepository, pendingInteractionRepository });
+  return { config, db, client, foodVision, workoutVision, repositories: { mealRepository, weightRepository, workoutRepository, lifeRepository, memoryRepository, reminderRepository, eventRepository, scheduleRepository, conversationRepository, pendingInteractionRepository }, services: { planService, mealService, weightService, lifeService, memoryService, stateService, scheduleMutationService, workoutService }, contextBuilder, decisionEngine, actionExecutor, responseComposer, orchestrator };
 }
 module.exports = { createContainer };

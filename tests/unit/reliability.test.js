@@ -116,6 +116,41 @@ test('recent conversation and food clarification pending interaction close witho
   assert.equal(container.contextBuilder.build({ id: 'context', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T04:02:00.000Z', payload: {} }).recent_conversation.length >= 1, true);
 });
 
+test('training screenshot becomes a confirmation draft and writes once only after user confirms', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const foodVision = { imageHash() { return 'workout-shot'; }, async analyze() { return { is_food: false, confidence: 'high', items: [], image_hash: 'workout-shot' }; } };
+  const workoutVision = {
+    imageHash() { return 'workout-shot'; },
+    async analyze() { return { is_workout_screenshot: true, confidence: 'high', workout_name: '坡度走', workout_type: 'cardio', total_duration_min: 30, cardio_done_min: 30, rpe_score: 6, needs_clarification: false, image_hash: 'workout-shot' }; },
+  };
+  const client = { async text() { return { content: '收到。' }; }, async structuredJson() { throw new Error('not called'); } };
+  const container = createTestContainer(fixture, { foodVision, workoutVision, client });
+  const image = { id: 'workout-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T10:00:00.000Z', payload: { path: '/ignored', message_id: 'workout-shot' } };
+  const draft = await container.orchestrator.handle(image);
+  assert.match(draft.response, /记上吧/);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM workouts').get().n, 0);
+  assert.equal(container.repositories.pendingInteractionRepository.active('0bfe935e70c3', 'workout_image_draft', '2026-08-10T10:00:01.000Z').status, 'active');
+  await container.orchestrator.handle({ id: 'workout-confirm', type: 'user_message', user_id: 'u', timestamp: '2026-08-10T10:01:00.000Z', payload: { text: '记上吧' } });
+  const workout = fixture.db.prepare('SELECT workout_type,workout_name,total_duration_min,cardio_done_min,rpe_score FROM workouts').get();
+  assert.deepEqual(workout, { workout_type: 'cardio', workout_name: '坡度走', total_duration_min: 30, cardio_done_min: 30, rpe_score: 6 });
+  assert.equal(fixture.db.prepare("SELECT status FROM pending_interactions WHERE source_event_id='workout-image'").get().status, 'completed');
+  const duplicate = await container.orchestrator.handle({ ...image, id: 'workout-image-duplicate', timestamp: '2026-08-10T10:02:00.000Z' });
+  assert.match(duplicate.response, /已经记过/);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM workouts').get().n, 1);
+});
+
+test('non-food non-workout image does not create a health record', async (t) => {
+  const fixture = createTestDb(); t.after(fixture.cleanup);
+  const foodVision = { async analyze() { return { is_food: false, confidence: 'high', items: [] }; } };
+  const workoutVision = { async analyze() { return { is_workout_screenshot: false, confidence: 'high', needs_clarification: false }; } };
+  const client = { async text() { return { content: '收到。' }; } };
+  const container = createTestContainer(fixture, { foodVision, workoutVision, client });
+  const result = await container.orchestrator.handle({ id: 'plain-image', type: 'image_received', user_id: 'u', timestamp: '2026-08-10T10:00:00.000Z', payload: { path: '/ignored', message_id: 'plain' } });
+  assert.match(result.response, /不乱记/);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM workouts').get().n, 0);
+  assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM meals').get().n, 0);
+});
+
 test('food quantity clarification recalibrates nutrition through text model without another vision request', async (t) => {
   const fixture = createTestDb(); t.after(fixture.cleanup);
   let visionCalls = 0; let calibrationCalls = 0;

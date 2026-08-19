@@ -33,6 +33,13 @@ class PendingInteractionRepository {
     const row = rows.find((entry) => JSON.parse(entry.payload_json).image_hash === imageHash);
     return row ? { ...row, payload: JSON.parse(row.payload_json) } : null;
   }
+  workoutDraftByImageHash(userIdHash, imageHash, now = new Date().toISOString()) {
+    this.expire(now);
+    const rows = this.db.prepare(`SELECT * FROM pending_interactions WHERE user_id_hash=? AND kind='workout_image_draft'
+      ORDER BY created_at DESC LIMIT 20`).all(userIdHash);
+    const row = rows.find((entry) => JSON.parse(entry.payload_json).image_hash === imageHash);
+    return row ? { ...row, payload: JSON.parse(row.payload_json) } : null;
+  }
   get(id) { const row = this.db.prepare('SELECT * FROM pending_interactions WHERE id=?').get(id); return row ? { ...row, payload: JSON.parse(row.payload_json) } : null; }
   complete(id, now = new Date().toISOString()) { this.db.prepare("UPDATE pending_interactions SET status='completed', completed_at=?, updated_at=? WHERE id=? AND status='active'").run(now, now, id); }
   cancel(id, now = new Date().toISOString()) { this.db.prepare("UPDATE pending_interactions SET status='cancelled', completed_at=?, updated_at=? WHERE id=? AND status='active'").run(now, now, id); }

@@ -36,6 +36,7 @@ function ambiguousTotalWeight(text, items) {
 }
 
 function isRpeOnly(text) { return /^(?:rpe\s*)?(?:10|[1-9])(?:\s*分)?$/i.test(String(text).trim()); }
+function workoutDraftCommand(text) { return /(?:记上|记录|保存|算训练|就是这次训练|不记|不用记|算了)/.test(String(text)); }
 function needsRepair(decision, context, text) {
   const trainingCompletion = context.state.training.planned && !context.state.training.completed
     && /(?:训练|练).*(?:完|结束)|(?:完|结束).*(?:训练|练)/.test(String(text));
@@ -94,6 +95,14 @@ class Orchestrator {
   }
 
   async completePending(event, context, userIdHash, signal) {
+    const workoutDraft = this.pendingInteractionRepository.active(userIdHash, 'workout_image_draft', event.timestamp);
+    if (workoutDraft && workoutDraftCommand(event.payload.text)) {
+      if (/(?:不记|不用记|算了)/.test(event.payload.text)) {
+        this.pendingInteractionRepository.cancel(workoutDraft.id, event.timestamp);
+        return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '用户取消训练截图草稿', tone: 'neutral' }, actionResults: [], responseOverride: '好，这张训练截图不记入训练记录。' };
+      }
+      return this.completeWorkoutImageDraft(workoutDraft, event, context, userIdHash);
+    }
     const draft = this.pendingInteractionRepository.activeFoodDraft(userIdHash, event.timestamp);
     if (draft && looksLikeFoodDraftReply(event.payload.text)) {
       const relation = await this.resolveFoodDraftRelation(draft, event, userIdHash, signal);
@@ -141,6 +150,24 @@ class Orchestrator {
       return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '已补充训练 RPE', tone: 'neutral' }, actionResults: [result], responseOverride: `RPE ${rpe} 已补到刚才那次训练里了。` };
     }
     return null;
+  }
+
+  completeWorkoutImageDraft(draft, event, context, userIdHash) {
+    const analysis = draft.payload.analysis;
+    if (analysis.needs_clarification || (!analysis.total_duration_min && !analysis.cardio_done_min && !analysis.workout_name)) {
+      return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: analysis.clarification_question || '这次训练大概练了多久、是什么训练？', response_goal: '澄清训练截图数据', tone: 'neutral' }, actionResults: [], responseOverride: analysis.clarification_question || '这张截图的信息还不够确定：这次训练大概练了多久、是什么训练？' };
+    }
+    const result = this.workoutService.logWorkout({
+      actionKey: `${event.id}:workout-image`, logicalDate: context.time.logical_date,
+      workoutType: analysis.workout_type || context.state.training.type || 'other',
+      workoutName: analysis.workout_name || context.state.training.name || '截图训练',
+      totalDurationMin: analysis.total_duration_min, cardioDoneMin: analysis.cardio_done_min,
+      rpeScore: analysis.rpe_score, notes: analysis.notes || null, sourceEventId: event.id, recordedAt: event.timestamp,
+    });
+    this.pendingInteractionRepository.complete(draft.id, event.timestamp);
+    const decision = { intent: 'record', actions: [], needs_followup: false, response_goal: '已根据确认的训练截图记录训练', tone: 'neutral' };
+    this.createRpeFollowup(event, userIdHash, [result], decision);
+    return { decision, actionResults: [result], responseOverride: analysis.rpe_score ? '训练截图已确认并记入记录。' : '训练截图已确认并记入记录。顺便告诉猫猫这次 RPE 是多少？' };
   }
 
   async resolveFoodDraftRelation(draft, event, userIdHash, signal) {
@@ -197,7 +224,7 @@ class Orchestrator {
       return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '这张图还在等你确认是什么或大概份量。', response_goal: '复用已有图片饮食草稿，不重复视觉分析', tone: 'neutral' }, actionResults: [], responseOverride: '这张图还在等你确认是什么或大概份量，我不会重复分析或记账。' };
     }
     const analysis = await this.foodVision.analyze(event.payload.path, { signal });
-    if (!analysis.is_food) return { decision: { intent: 'chat', actions: [], needs_followup: false, response_goal: '自然说明这不是食物图片，不进行饮食记录', tone: 'neutral' }, actionResults: [] };
+    if (!analysis.is_food) return this.handleNonFoodImage(event, context, userIdHash, signal);
     if (this.mealService.repository.getImageIngestion(analysis.image_hash)) return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '此图片已记录，不重复入库', tone: 'neutral' }, actionResults: [], responseOverride: '这张图已经记过了，我不会重复记账。' };
     const draft = this.pendingInteractionRepository.activeFoodDraftByImageHash(userIdHash, analysis.image_hash, event.timestamp)
       || this.pendingInteractionRepository.create({ userIdHash, kind: 'food_image_draft', payload: { analysis, image_hash: analysis.image_hash, source_message_id: event.payload.message_id, caption: event.payload.caption || null, meal_type: event.payload.meal_type }, sourceEventId: event.id, now: event.timestamp });
@@ -205,5 +232,17 @@ class Orchestrator {
     const names = analysis.items.slice(0, 3).map((item) => item.name).join('、') || '一顿食物';
     return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '这顿具体是什么或者大概多少？', response_goal: '图片已保存为草稿，等待用户确认后再入库', tone: 'neutral' }, actionResults: [], responseOverride: `图我看到了，我先没直接记账。看起来像 ${names}；你补一句是什么或者大概份量，我再记准一点。` };
   }
+
+  async handleNonFoodImage(event, context, userIdHash, signal) {
+    const imageHash = this.workoutVision.imageHash?.(event.payload.path);
+    const existing = imageHash && this.pendingInteractionRepository.workoutDraftByImageHash(userIdHash, imageHash, event.timestamp);
+    if (existing?.status === 'completed') return { decision: { intent: 'record', actions: [], needs_followup: false, response_goal: '训练截图已记录，避免重复', tone: 'neutral' }, actionResults: [], responseOverride: '这张训练截图已经记过了，我不会重复记录。' };
+    if (existing?.status === 'active') return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: '要把刚才这张训练截图记入今天训练吗？', response_goal: '等待训练截图确认', tone: 'neutral' }, actionResults: [], responseOverride: '这张训练截图还在等你确认；回复“记上吧”才会写入训练记录。' };
+    const analysis = await this.workoutVision.analyze(event.payload.path, { signal });
+    if (!analysis.is_workout_screenshot) return { decision: { intent: 'chat', actions: [], needs_followup: false, response_goal: '自然说明图片不是食物或训练数据截图，不自动记录', tone: 'neutral' }, actionResults: [], responseOverride: '这张图看起来不是食物或可识别的训练数据截图，所以我先不乱记。' };
+    this.pendingInteractionRepository.create({ userIdHash, kind: 'workout_image_draft', payload: { analysis, image_hash: analysis.image_hash, source_message_id: event.payload.message_id }, sourceEventId: event.id, now: event.timestamp });
+    const summary = [analysis.workout_name, analysis.total_duration_min != null ? `${analysis.total_duration_min} 分钟` : null, analysis.cardio_done_min != null ? `有氧 ${analysis.cardio_done_min} 分钟` : null].filter(Boolean).join('，') || '一条训练数据';
+    return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: analysis.clarification_question || '要把这次训练记入今天记录吗？', response_goal: '训练截图已提取为待确认草稿', tone: 'neutral' }, actionResults: [], responseOverride: `猫猫看到了训练截图：${summary}。我先没直接写入；确认无误就回复“记上吧”。${analysis.needs_clarification ? ` ${analysis.clarification_question || '有些字段看不清，也可以补一句说明。'}` : ''}` };
+  }
 }
-module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, foodDraftRelationSchema, inputKind, ambiguousTotalWeight, needsRepair };
+module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, foodDraftRelationSchema, inputKind, ambiguousTotalWeight, needsRepair, workoutDraftCommand };
