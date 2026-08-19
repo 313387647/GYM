@@ -47,10 +47,17 @@ class MimoClient {
         const normalized = error instanceof LlmResponseError ? error : this.normalizeStructuredError(error, response, vision);
         lastError = normalized;
         if (vision && normalized.code === 'INVALID_JSON') this.logVisionDiagnostic(response, normalized);
-        const retryable = attempt === 1 && (normalized.code === 'EMPTY_CONTENT' || (vision && (
-          ['INVALID_JSON', 'TIMEOUT', 'NETWORK_ERROR'].includes(normalized.code)
-          || normalized.status === 408 || normalized.status === 429 || normalized.status >= 500
-        )));
+        const retryable = attempt === 1 && (
+          normalized.code === 'EMPTY_CONTENT'
+          || (!vision && normalized.code === 'SCHEMA_VALIDATION_FAILED')
+          || (vision && (
+            ['INVALID_JSON', 'TIMEOUT', 'NETWORK_ERROR'].includes(normalized.code)
+            || normalized.status === 408 || normalized.status === 429 || normalized.status >= 500
+          ))
+        );
+        if (retryable && normalized.code === 'SCHEMA_VALIDATION_FAILED') {
+          logger.warn('mimo.structured_schema_retry', { model: model || (vision ? this.config.visionModel : this.config.textModel), attempt, vision });
+        }
         if (!retryable) throw normalized;
       }
     }

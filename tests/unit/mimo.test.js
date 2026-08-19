@@ -117,6 +117,20 @@ test('structured JSON retries one empty response and then succeeds', async () =>
   assert.equal(result.data.ok, true);
 });
 
+test('text structured JSON retries one schema-invalid response before any action can run', async () => {
+  let calls = 0;
+  const client = new MimoClient({ apiKey: 'test', apiBase: 'https://example.invalid', textModel: 'text', visionModel: 'vision', timeoutMs: 1000, maxRetries: 0 }, {
+    fetch: async () => {
+      calls += 1;
+      const content = calls === 1 ? '{"ok":"wrong-type"}' : '{"ok":true}';
+      return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }), { status: 200 });
+    }, sleep: async () => {},
+  });
+  const result = await client.structuredJson({ messages: [], schema: z.object({ ok: z.boolean() }) });
+  assert.equal(calls, 2);
+  assert.equal(result.data.ok, true);
+});
+
 test('two structured empty responses fail after exactly two attempts', async () => {
   let calls = 0;
   const client = new MimoClient({ apiKey: 'test', apiBase: 'https://example.invalid', textModel: 'text', visionModel: 'vision', timeoutMs: 1000, maxRetries: 9 }, {
