@@ -6,6 +6,7 @@ const { z } = require('zod');
 const { mealItemSchema } = require('../schemas/actions');
 
 const SCHEDULED_TYPES = new Set(['morning_check', 'meal_window', 'pre_workout', 'workout_window', 'evening_review', 'weekly_review', 'scheduled_check']);
+const STRUCTURED_RESPONSE_FAILURES = new Set(['SCHEMA_VALIDATION_FAILED', 'INVALID_JSON', 'EMPTY_CONTENT']);
 
 function cancelled(signal) {
   if (!signal?.aborted) return;
@@ -46,6 +47,24 @@ function needsRepair(decision, context, text) {
   return false;
 }
 function looksLikeFoodDraftReply(text) { return Boolean(String(text).trim()) && !isRpeOnly(text); }
+
+function structuredFailureFallback(event, errorCode) {
+  const isImage = event.type === 'image_received';
+  return {
+    event_id: event.id,
+    decision: {
+      intent: 'unknown', actions: [], needs_followup: true,
+      followup_question: isImage ? '这张图我这次没能可靠看清，请稍后重新发一次。' : '这条消息我这次没能可靠理解，请换一句更直接的描述再发一次。',
+      response_goal: '结构化模型输出不合格时安全降级，不写入任何数据', tone: 'neutral',
+    },
+    actions: [],
+    response: isImage
+      ? '这张图我这次没能可靠看清，所以没有写入任何记录。请稍后重新发一次就好。'
+      : '我刚才没能可靠解析这条消息，所以没有替你写入任何记录。麻烦换一句更直接的描述再发一次就好。',
+    degraded: true,
+    error_code: errorCode,
+  };
+}
 
 class Orchestrator {
   constructor(dependencies) { Object.assign(this, dependencies); }
@@ -88,6 +107,13 @@ class Orchestrator {
       const errorCode = error.code || 'AGENT_ERROR';
       this.eventRepository.mark(event.id, 'failed', { errorCode });
       const scheduled = SCHEDULED_TYPES.has(event.type);
+      if (!scheduled && STRUCTURED_RESPONSE_FAILURES.has(errorCode)) {
+        const result = structuredFailureFallback(event, errorCode);
+        this.eventRepository.mark(event.id, 'completed', { decision: result.decision, result });
+        if (result.response) this.conversationRepository.add({ userIdHash, role: 'assistant', content: result.response, eventId: event.id, now: event.timestamp });
+        logger.warn('agent.event.safe_degraded', { event_id: event.id, user_id: userIdHash, event_type: event.type, error_code: errorCode });
+        return result;
+      }
       if (errorCode === 'SCHEDULED_ACTION_FORBIDDEN') logger.warn('agent.scheduled_action_blocked', { event_id: event.id, event_type: event.type });
       else logger.error('agent.event.failed', { event_id: event.id, user_id: userIdHash, event_type: event.type, error_code: errorCode, message: error.message });
       return { event_id: event.id, error: errorCode, response: scheduled || signal?.aborted ? null : (error instanceof LlmError ? '猫猫的大脑刚刚走神了，数据还没有乱写。稍后再试一次就好。' : '这次处理没有完成，数据没有重复记录。请稍后再试。') };
@@ -245,4 +271,4 @@ class Orchestrator {
     return { decision: { intent: 'record', actions: [], needs_followup: true, followup_question: analysis.clarification_question || '要把这次训练记入今天记录吗？', response_goal: '训练截图已提取为待确认草稿', tone: 'neutral' }, actionResults: [], responseOverride: `猫猫看到了训练截图：${summary}。我先没直接写入；确认无误就回复“记上吧”。${analysis.needs_clarification ? ` ${analysis.clarification_question || '有些字段看不清，也可以补一句说明。'}` : ''}` };
   }
 }
-module.exports = { Orchestrator, SCHEDULED_TYPES, foodRecalibrationSchema, foodDraftRelationSchema, inputKind, ambiguousTotalWeight, needsRepair, workoutDraftCommand };
+module.exports = { Orchestrator, SCHEDULED_TYPES, STRUCTURED_RESPONSE_FAILURES, foodRecalibrationSchema, foodDraftRelationSchema, inputKind, ambiguousTotalWeight, needsRepair, workoutDraftCommand, structuredFailureFallback };

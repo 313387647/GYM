@@ -36,9 +36,16 @@ class MimoClient {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       let response;
       try {
+        // A second identical request tends to reproduce the same malformed shape.
+        // Keep the original facts, but make the repair instruction explicit without
+        // echoing model output (which may contain user data) back into logs or prompts.
+        const attemptMessages = attempt === 1 ? messages : [...messages, {
+          role: 'user',
+          content: '上一次输出没有通过格式校验。请重新根据上面的输入，只返回一个符合要求的 JSON 对象；不要 Markdown、解释或额外字段。',
+        }];
         response = vision
-          ? await this.vision({ messages, model, temperature, maxTokens, signal, maxRetries: 0, responseFormat, thinking })
-          : await this.text({ messages, model, temperature, maxTokens, signal, maxRetries: 0, responseFormat, thinking });
+          ? await this.vision({ messages: attemptMessages, model, temperature, maxTokens, signal, maxRetries: 0, responseFormat, thinking })
+          : await this.text({ messages: attemptMessages, model, temperature, maxTokens, signal, maxRetries: 0, responseFormat, thinking });
         const parsedResult = parseJsonObjectDetailed(response.content);
         const validation = schema.safeParse(parsedResult.value);
         if (!validation.success) throw new LlmResponseError('MiMo JSON failed schema validation', { code: 'SCHEMA_VALIDATION_FAILED', details: validation.error.flatten() });
